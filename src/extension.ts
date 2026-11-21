@@ -185,14 +185,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await executeSource(item.fileName, source);
     }),
 
+    vscode.commands.registerCommand('relapse.showOutput', () => {
+      outputChannel.show(true);
+    }),
+
     vscode.commands.registerCommand('relapse.refreshSessions', () => manager.refresh()),
 
     vscode.commands.registerCommand('relapse.toggleOutput', async () => {
       const current = getConfig().get<boolean>('redirectOutput', true);
-      await getConfig().update('redirectOutput', !current, vscode.ConfigurationTarget.Global);
-      void vscode.window.showInformationMessage(
-        `Relapse output redirection ${!current ? 'enabled' : 'disabled'}.`
-      );
+      const next = !current;
+      await getConfig().update('redirectOutput', next, vscode.ConfigurationTarget.Global);
+      if (next) {
+        const picked = await vscode.window.showInformationMessage(
+          'Relapse output redirection enabled (Output → Relapse).',
+          'Show Output'
+        );
+        if (picked === 'Show Output') {
+          outputChannel.show(true);
+        }
+      } else {
+        void vscode.window.showInformationMessage('Relapse output redirection disabled.');
+      }
     }),
 
     vscode.commands.registerCommand('relapse.openConsole', (item?: SessionTreeItem) => {

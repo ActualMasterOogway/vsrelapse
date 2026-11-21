@@ -43,93 +43,129 @@
     "commands": [
       {
         "command": "relapse.executeActive",
-        "title": "Execute in Relapse",
+        "category": "Relapse",
+        "title": "Execute Active Editor",
         "icon": "$(play)"
       },
       {
         "command": "relapse.executeSelection",
-        "title": "Execute Selection in Relapse",
+        "category": "Relapse",
+        "title": "Execute Selection",
         "icon": "$(play)"
       },
       {
         "command": "relapse.executeFile",
+        "category": "Relapse",
         "title": "Execute Script",
         "icon": "$(play)"
       },
       {
+        "command": "relapse.showOutput",
+        "category": "Relapse",
+        "title": "Show Output",
+        "icon": "$(list-unordered)"
+      },
+      {
         "command": "relapse.refreshSessions",
+        "category": "Relapse",
         "title": "Refresh Sessions",
         "icon": "$(refresh)"
       },
       {
         "command": "relapse.toggleOutput",
+        "category": "Relapse",
         "title": "Toggle Output Redirection",
         "icon": "$(output)"
       },
       {
         "command": "relapse.openConsole",
+        "category": "Relapse",
         "title": "Open rconsole Terminal",
         "icon": "$(terminal)"
       },
       {
         "command": "relapse.selectTargets",
+        "category": "Relapse",
         "title": "Select Target Sessions",
         "icon": "$(plug)"
       },
       {
         "command": "relapse.refreshProfiles",
+        "category": "Relapse",
         "title": "Refresh Profiles",
         "icon": "$(refresh)"
       },
       {
         "command": "relapse.createProfile",
+        "category": "Relapse",
         "title": "New Profile",
         "icon": "$(add)"
       },
       {
         "command": "relapse.launchProfile",
+        "category": "Relapse",
         "title": "Launch Profile",
         "icon": "$(rocket)"
       },
       {
         "command": "relapse.launchProfileToPlace",
+        "category": "Relapse",
         "title": "Launch to Place / Job ID",
         "icon": "$(link-external)"
       },
       {
         "command": "relapse.importCookie",
+        "category": "Relapse",
         "title": "Import .ROBLOSECURITY Cookie",
         "icon": "$(key)"
       },
       {
         "command": "relapse.refreshAccount",
+        "category": "Relapse",
         "title": "Refresh Account Info",
         "icon": "$(sync)"
       },
       {
         "command": "relapse.renameProfile",
+        "category": "Relapse",
         "title": "Rename Profile",
         "icon": "$(edit)"
       },
       {
         "command": "relapse.deleteProfile",
+        "category": "Relapse",
         "title": "Delete Profile",
         "icon": "$(trash)"
       },
       {
         "command": "relapse.refreshScripts",
+        "category": "Relapse",
         "title": "Refresh Scripts",
         "icon": "$(refresh)"
       },
       {
         "command": "relapse.newScript",
+        "category": "Relapse",
         "title": "New Script",
         "icon": "$(new-file)"
       },
       {
         "command": "relapse.deleteScript",
+        "category": "Relapse",
         "title": "Delete Script",
         "icon": "$(trash)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "relapse.executeActive",
+        "key": "ctrl+alt+r",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "relapse.executeSelection",
+        "key": "ctrl+alt+shift+r",
+        "when": "editorTextFocus && editorHasSelection"
       }
     ],
     "menus": {
@@ -137,10 +173,14 @@
         {
           "command": "relapse.executeActive",
           "group": "navigation",
-          "when": "editorTextFocus && (editorLangId == lua || editorLangId == luau || resourceExtname == .luau || resourceExtname == .lua)"
+          "when": "editorTextFocus"
         }
       ],
       "editor/context": [
+        {
+          "command": "relapse.executeActive",
+          "group": "1_modification"
+        },
         {
           "command": "relapse.executeSelection",
           "group": "1_modification",
@@ -148,6 +188,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "relapse.showOutput",
+          "group": "navigation",
+          "when": "view == relapse.sessions"
+        },
         {
           "command": "relapse.toggleOutput",
           "group": "navigation",

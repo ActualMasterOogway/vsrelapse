@@ -34,6 +34,7 @@ export async function run(): Promise<void> {
     'relapse.executeActive',
     'relapse.executeSelection',
     'relapse.executeFile',
+    'relapse.showOutput',
     'relapse.refreshSessions',
     'relapse.toggleOutput',
     'relapse.openConsole',
