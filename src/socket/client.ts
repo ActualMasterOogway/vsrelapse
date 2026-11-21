@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { RelapseSocket } from './transport';
 
+const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
+
 export type SocketClientState = 'disconnected' | 'connecting' | 'waiting' | 'ready';
 
 export type SocketClientSendResult =
@@ -135,7 +137,7 @@ export class SocketClient extends EventEmitter {
     }
     let parsed: unknown;
     try {
-      parsed = JSON.parse(data.toString('utf8'));
+      parsed = JSON.parse(utf8Decoder.decode(data));
     } catch {
       this.invalidMessage();
       return;

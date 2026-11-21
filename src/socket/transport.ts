@@ -9,6 +9,7 @@ const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
 const MAX_QUEUED_BYTES = 16 * 1024 * 1024;
 const MAX_QUEUED_MESSAGES = 256;
 const DEFAULT_OPENING_TIMEOUT_MS = 5000;
+const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 
 export type RelapseSocketState = 'closed' | 'connecting' | 'opening' | 'open';
 
@@ -182,7 +183,7 @@ export class RelapseSocket extends EventEmitter {
     }
     let parsed: unknown;
     try {
-      parsed = JSON.parse(body.toString('utf8'));
+      parsed = JSON.parse(utf8Decoder.decode(body));
     } catch {
       this.finish('protocol_error', 'expected a JSON channel response');
       return;

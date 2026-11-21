@@ -108,6 +108,12 @@ describe('SessionManager', () => {
       assert.ok(execDefault.includes('hello.luau'));
       assert.ok(execAlt.includes('vsrelapse-console.luau'));
       assert.ok(execAlt.includes('hello.luau'));
+      // Uncheck both and verify next poll tick does not re-target
+      mgr.setTargeted(altSock, false);
+      mgr.setTargeted(defaultSock, false);
+      assert.equal(mgr.getTargetedPaths().length, 0);
+      await new Promise((r) => setTimeout(r, 80));
+      assert.equal(mgr.getTargetedPaths().length, 0);
     } finally {
       mgr.dispose();
       s1.close();

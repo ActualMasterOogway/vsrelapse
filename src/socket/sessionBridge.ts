@@ -6,6 +6,7 @@ export type OutputState = 'off' | 'waiting' | 'connecting' | 'active' | 'failed'
 
 const CHANNEL_NAME = 'vsrelapse.session.v2';
 const VALID_LEVELS = new Set(['print', 'warn', 'error', 'info']);
+const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 
 export class SessionBridge extends EventEmitter {
   private readonly client: SocketClient;
@@ -182,7 +183,7 @@ export class SessionBridge extends EventEmitter {
     }
     let parsed: unknown;
     try {
-      parsed = JSON.parse(data.toString('utf8'));
+      parsed = JSON.parse(utf8Decoder.decode(data));
     } catch {
       this.fail('Invalid UI channel message. Toggle redirection to retry.');
       return;
@@ -268,7 +269,7 @@ export function encodeLuaString(text: string): string {
     const b = bytes[i];
     if (b === 0x22 || b === 0x5c) {
       out += '\\' + String.fromCharCode(b);
-    } else if (b < 32 || b === 127) {
+    } else if (b < 32 || b >= 127) {
       out += '\\' + String(b).padStart(3, '0');
     } else {
       out += String.fromCharCode(b);

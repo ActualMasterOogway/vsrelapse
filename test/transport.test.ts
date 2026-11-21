@@ -196,4 +196,28 @@ describe('RelapseSocket', () => {
       server.close();
     }
   });
+
+  it('closes with protocol_error on invalid UTF-8 in opening response', async () => {
+    const sockPath = makeSocketPath();
+    const server = net.createServer((conn) => {
+      const state = { buf: Buffer.alloc(0) };
+      conn.on('data', (chunk) => {
+        if (decodeFrames(chunk, state).length > 0) {
+          conn.write(encodeFrame(Buffer.from([0x7b, 0xff, 0xfe, 0x7d])));
+        }
+      });
+    });
+
+    await new Promise<void>((resolve) => server.listen(sockPath, resolve));
+    try {
+      const client = new RelapseSocket();
+      const closed = await new Promise<{ reason: string }>((resolve) => {
+        client.on('close', (reason) => resolve({ reason }));
+        client.connect(sockPath, '@main');
+      });
+      assert.equal(closed.reason, 'protocol_error');
+    } finally {
+      server.close();
+    }
+  });
 });

@@ -109,13 +109,13 @@ describe('SessionBridge and ConsoleBridge', () => {
         { level: 'warn', text: '2 messages dropped: output arrived too quickly.' },
       ]);
 
-      const execRes = bridge.execute('my.luau', 'print("hi\n")');
+      const execRes = bridge.execute('my.luau', 'print("hi—🔥\n")');
       assert.equal(execRes, 'queued');
       await new Promise((r) => setTimeout(r, 20));
       assert.equal(mainExecs[1].name, 'vsrelapse-execute.luau');
       assert.equal(
         mainExecs[1].source,
-        'getgenv().__vsrelapse_session_v2.execute("print(\\"hi\\010\\")","my.luau")'
+        'getgenv().__vsrelapse_session_v2.execute("print(\\"hi\\226\\128\\148\\240\\159\\148\\165\\010\\")","my.luau")'
       );
     } finally {
       bridge.dispose();
@@ -147,7 +147,7 @@ describe('SessionBridge and ConsoleBridge', () => {
             }
           } else if (channel === '@main' && msg.op === 'execute') {
             conn.write(encodeFrame({ type: 'exec_result', script_id: msg.script_id, phase: 'submitted' }));
-          } else if (channel === 'vsrelapse.console.v1' && msg.op === 'input') {
+          } else if (channel === 'vsrelapse.console.v1' && msg.op === 'input_response') {
             consoleInputs.push(msg);
           }
         }
@@ -186,7 +186,7 @@ describe('SessionBridge and ConsoleBridge', () => {
         ['entry', 'info', 'ready!'],
         ['input', 5],
       ]);
-      assert.deepEqual(consoleInputs, [{ op: 'input', id: 5, text: 'hello' }]);
+      assert.deepEqual(consoleInputs, [{ op: 'input_response', id: 5, text: 'hello' }]);
     } finally {
       consoleBridge.dispose();
       client.dispose();

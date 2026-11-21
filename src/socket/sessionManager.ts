@@ -141,14 +141,16 @@ export class SessionManager extends EventEmitter {
       }
 
       // Add new sockets
+      let added = false;
       for (const sockPath of discovered) {
         if (!this.sessions.has(sockPath)) {
           this.addSession(sockPath);
           changed = true;
+          added = true;
         }
       }
 
-      if (this.autoTargetFirst && this.targeted.size === 0 && this.sessions.size > 0) {
+      if (added && this.autoTargetFirst && this.targeted.size === 0 && this.sessions.size > 0) {
         const firstReady = Array.from(this.sessions.values()).find((s) => s.client.isReady());
         const pick = firstReady ?? Array.from(this.sessions.values())[0];
         if (pick) {

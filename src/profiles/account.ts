@@ -19,7 +19,8 @@ export function cookieSha256(cookie: string): string {
 }
 
 function cookieFromHeader(text: string): string | null {
-  const parts = text.split(';');
+  const cleaned = text.replace(/^cookie:\s*/i, '');
+  const parts = cleaned.split(';');
   for (const raw of parts) {
     const part = raw.trim();
     if (part.startsWith('.ROBLOSECURITY=')) {

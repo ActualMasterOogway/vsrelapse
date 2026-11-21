@@ -56,6 +56,7 @@ describe('ProfileStore & AccountStore', () => {
   it('parses .ROBLOSECURITY cookies safely', () => {
     assert.equal(parseCookie('abc123token'), 'abc123token');
     assert.equal(parseCookie('  foo=bar; .ROBLOSECURITY=tok_xyz; Path=/  '), 'tok_xyz');
+    assert.equal(parseCookie('Cookie: .ROBLOSECURITY=hdr_tok; Path=/'), 'hdr_tok');
     assert.throws(() => parseCookie(''));
     assert.throws(() => parseCookie('bad"quote'));
     assert.throws(() => parseCookie('bad;semi'));

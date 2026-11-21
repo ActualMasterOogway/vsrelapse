@@ -186,6 +186,9 @@ export class ProfileStore {
       stdio: 'ignore',
       env,
     });
+    child.on('error', () => {
+      // Prevent unhandled 'error' event in extension host if exec fails asynchronously
+    });
     child.unref();
     return child.pid ?? 0;
   }

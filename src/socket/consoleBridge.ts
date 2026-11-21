@@ -4,6 +4,7 @@ import { SocketClient } from './client';
 
 const CHANNEL_NAME = 'vsrelapse.console.v1';
 const VALID_LEVELS = new Set(['print', 'warn', 'error', 'info']);
+const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 
 export class ConsoleBridge extends EventEmitter {
   private readonly client: SocketClient;
@@ -41,7 +42,7 @@ export class ConsoleBridge extends EventEmitter {
     if (!this.ready || !this.channel || this.channel.getState() !== 'open') {
       return false;
     }
-    const payload = JSON.stringify({ op: 'input', id, text });
+    const payload = JSON.stringify({ op: 'input_response', id, text });
     return this.channel.send(payload) === 'queued';
   }
 
@@ -133,7 +134,7 @@ export class ConsoleBridge extends EventEmitter {
     }
     let parsed: unknown;
     try {
-      parsed = JSON.parse(data.toString('utf8'));
+      parsed = JSON.parse(utf8Decoder.decode(data));
     } catch {
       this.fail('Invalid console channel message');
       return;
