@@ -10,7 +10,254 @@
   "categories": [
     "Other"
   ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "relapse",
+          "title": "Relapse",
+          "icon": "resources/icons/relapse.svg"
+        }
+      ]
+    },
+    "views": {
+      "relapse": [
+        {
+          "id": "relapse.sessions",
+          "name": "Sessions"
+        },
+        {
+          "id": "relapse.profiles",
+          "name": "Profiles"
+        },
+        {
+          "id": "relapse.scripts",
+          "name": "Scripts"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "relapse.executeActive",
+        "title": "Execute in Relapse",
+        "icon": "$(play)"
+      },
+      {
+        "command": "relapse.executeSelection",
+        "title": "Execute Selection in Relapse",
+        "icon": "$(play)"
+      },
+      {
+        "command": "relapse.executeFile",
+        "title": "Execute Script",
+        "icon": "$(play)"
+      },
+      {
+        "command": "relapse.refreshSessions",
+        "title": "Refresh Sessions",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "relapse.toggleOutput",
+        "title": "Toggle Output Redirection",
+        "icon": "$(output)"
+      },
+      {
+        "command": "relapse.openConsole",
+        "title": "Open rconsole Terminal",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "relapse.selectTargets",
+        "title": "Select Target Sessions",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "relapse.refreshProfiles",
+        "title": "Refresh Profiles",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "relapse.createProfile",
+        "title": "New Profile",
+        "icon": "$(add)"
+      },
+      {
+        "command": "relapse.launchProfile",
+        "title": "Launch Profile",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "relapse.launchProfileToPlace",
+        "title": "Launch to Place / Job ID",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "relapse.importCookie",
+        "title": "Import .ROBLOSECURITY Cookie",
+        "icon": "$(key)"
+      },
+      {
+        "command": "relapse.refreshAccount",
+        "title": "Refresh Account Info",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "relapse.renameProfile",
+        "title": "Rename Profile",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "relapse.deleteProfile",
+        "title": "Delete Profile",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "relapse.refreshScripts",
+        "title": "Refresh Scripts",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "relapse.newScript",
+        "title": "New Script",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "relapse.deleteScript",
+        "title": "Delete Script",
+        "icon": "$(trash)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "relapse.executeActive",
+          "group": "navigation",
+          "when": "editorTextFocus && (editorLangId == lua || editorLangId == luau || resourceExtname == .luau || resourceExtname == .lua)"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "relapse.executeSelection",
+          "group": "1_modification",
+          "when": "editorHasSelection"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "relapse.toggleOutput",
+          "group": "navigation",
+          "when": "view == relapse.sessions"
+        },
+        {
+          "command": "relapse.refreshSessions",
+          "group": "navigation",
+          "when": "view == relapse.sessions"
+        },
+        {
+          "command": "relapse.createProfile",
+          "group": "navigation",
+          "when": "view == relapse.profiles"
+        },
+        {
+          "command": "relapse.refreshProfiles",
+          "group": "navigation",
+          "when": "view == relapse.profiles"
+        },
+        {
+          "command": "relapse.refreshScripts",
+          "group": "navigation",
+          "when": "view == relapse.scripts"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "relapse.openConsole",
+          "group": "inline",
+          "when": "view == relapse.sessions && viewItem == session"
+        },
+        {
+          "command": "relapse.launchProfile",
+          "group": "inline",
+          "when": "view == relapse.profiles && viewItem == profile"
+        },
+        {
+          "command": "relapse.launchProfileToPlace",
+          "group": "1_launch",
+          "when": "view == relapse.profiles && viewItem == profile"
+        },
+        {
+          "command": "relapse.importCookie",
+          "group": "2_account",
+          "when": "view == relapse.profiles && viewItem == profile"
+        },
+        {
+          "command": "relapse.refreshAccount",
+          "group": "2_account",
+          "when": "view == relapse.profiles && viewItem == profile"
+        },
+        {
+          "command": "relapse.renameProfile",
+          "group": "3_manage",
+          "when": "view == relapse.profiles && viewItem == profile"
+        },
+        {
+          "command": "relapse.deleteProfile",
+          "group": "3_manage",
+          "when": "view == relapse.profiles && viewItem == profile"
+        },
+        {
+          "command": "relapse.newScript",
+          "group": "inline",
+          "when": "view == relapse.scripts && viewItem == scriptFolder"
+        },
+        {
+          "command": "relapse.executeFile",
+          "group": "inline",
+          "when": "view == relapse.scripts && viewItem == scriptFile"
+        },
+        {
+          "command": "relapse.deleteScript",
+          "group": "2_manage",
+          "when": "view == relapse.scripts && viewItem == scriptFile"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Relapse",
+      "properties": {
+        "relapse.launcherPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the Relapse launcher executable."
+        },
+        "relapse.scriptsDir": {
+          "type": "string",
+          "default": "~/.local/share/relapse/scripts",
+          "description": "Directory for Relapse scripts."
+        },
+        "relapse.redirectOutput": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable vsrelapse.session.v2 output redirection from in-game scripts."
+        },
+        "relapse.autoOpenConsole": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically show the rconsole terminal when a script calls rconsoleshow or rconsoleprint."
+        },
+        "relapse.autoTargetFirst": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically target the first ready session when no sessions are selected."
+        }
+      }
+    }
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "compile": "node esbuild.mjs",
