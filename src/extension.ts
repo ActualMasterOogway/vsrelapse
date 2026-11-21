@@ -92,7 +92,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
 
-  const profilesProvider = new ProfilesTreeProvider(profileStore, accountStore);
+  const profilesProvider = new ProfilesTreeProvider(profileStore, accountStore, () =>
+    manager.listSessions()
+  );
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('relapse.profiles', profilesProvider)
   );
@@ -110,9 +112,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(statusBar);
 
   const updateStatusBar = () => {
+    const launching = profilesProvider.getLaunchingProfiles();
     const all = manager.listSessions();
     const targeted = all.filter((s) => s.targeted);
-    if (all.length === 0) {
+    if (launching.length > 0) {
+      statusBar.text = `$(loading~spin) Relapse: Launching ${launching.join(', ')}…`;
+      statusBar.tooltip = 'Waiting for Relapse session socket to appear';
+    } else if (all.length === 0) {
       statusBar.text = '$(plug) Relapse: No sessions';
       statusBar.tooltip = 'No active Relapse sockets found in /tmp';
     } else if (targeted.length === 0) {
@@ -127,7 +133,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     statusBar.show();
   };
 
-  manager.on('sessionsChanged', updateStatusBar);
+  manager.on('sessionsChanged', () => {
+    updateStatusBar();
+    profilesProvider.refresh();
+  });
   updateStatusBar();
 
   // Configuration changes
@@ -208,14 +217,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
 
-    vscode.commands.registerCommand('relapse.openConsole', (item?: SessionTreeItem) => {
-      const sockPath = item?.session.path ?? manager.getTargetedPaths()[0];
-      if (!sockPath) {
-        void vscode.window.showWarningMessage('No active Relapse session.');
-        return;
+    vscode.commands.registerCommand(
+      'relapse.openConsole',
+      (item?: SessionTreeItem | ProfileTreeItem) => {
+        let sockPath: string | undefined;
+        if (item instanceof SessionTreeItem) {
+          sockPath = item.session.path;
+        } else if (item instanceof ProfileTreeItem) {
+          sockPath =
+            item.profile.sessionPath ??
+            manager.listSessions().find((s) => s.name === item.profile.name)?.path;
+          if (!sockPath) {
+            void vscode.window.showInformationMessage(
+              `Session socket for "${item.profile.name}" is not connected yet.`
+            );
+            return;
+          }
+        } else {
+          sockPath = manager.getTargetedPaths()[0];
+        }
+        if (!sockPath) {
+          void vscode.window.showWarningMessage('No active Relapse session.');
+          return;
+        }
+        consoleManager.show(sockPath);
       }
-      consoleManager.show(sockPath);
-    }),
+    ),
 
     vscode.commands.registerCommand('relapse.selectTargets', async () => {
       const sessions = manager.listSessions();
@@ -260,6 +287,70 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return launcher;
   };
 
+  const launchWithFeedback = async (
+    profileName: string,
+    placeId?: string,
+    jobId?: string
+  ): Promise<void> => {
+    const launcher = await resolveLauncherPath();
+    if (!launcher) return;
+    if (placeId !== undefined || jobId !== undefined) {
+      buildJoinUri(placeId, jobId);
+    }
+
+    profilesProvider.setLaunching(profileName, true);
+    updateStatusBar();
+
+    try {
+      await profileStore.launchProfile(launcher, profileName, placeId, jobId);
+    } catch (err) {
+      profilesProvider.setLaunching(profileName, false);
+      updateStatusBar();
+      void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
+      return;
+    }
+
+    void vscode.window.withProgress(
+      {
+        location: { viewId: 'relapse.profiles' },
+        title: `Launching ${profileName}…`,
+      },
+      async () => {
+        await new Promise<void>((resolve) => {
+          let finished = false;
+          const finish = (connected: boolean) => {
+            if (finished) return;
+            finished = true;
+            sub.dispose();
+            clearTimeout(timer);
+            profilesProvider.setLaunching(profileName, false);
+            updateStatusBar();
+            if (connected) {
+              vscode.window.setStatusBarMessage(
+                `$(check) Relapse: ${profileName} session connected`,
+                4000
+              );
+            }
+            resolve();
+          };
+
+          const check = () => {
+            if (manager.listSessions().some((s) => s.name === profileName)) {
+              finish(true);
+            }
+          };
+
+          const sub = new vscode.Disposable(() => {
+            manager.off('sessionsChanged', check);
+          });
+          manager.on('sessionsChanged', check);
+          const timer = setTimeout(() => finish(false), 20_000);
+          void manager.refresh().then(check);
+        });
+      }
+    );
+  };
+
   context.subscriptions.push(
     vscode.commands.registerCommand('relapse.refreshProfiles', () => profilesProvider.refresh()),
 
@@ -283,22 +374,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     vscode.commands.registerCommand('relapse.launchProfile', async (item?: ProfileTreeItem) => {
       if (!item) return;
-      const launcher = await resolveLauncherPath();
-      if (!launcher) return;
-      try {
-        await profileStore.launchProfile(launcher, item.profile.name);
-        setTimeout(() => profilesProvider.refresh(), 500);
-      } catch (err) {
-        void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
-      }
+      await launchWithFeedback(item.profile.name);
     }),
 
     vscode.commands.registerCommand(
       'relapse.launchProfileToPlace',
       async (item?: ProfileTreeItem) => {
         if (!item) return;
-        const launcher = await resolveLauncherPath();
-        if (!launcher) return;
         const placeId = await vscode.window.showInputBox({
           prompt: `Place ID to join with profile "${item.profile.name}"`,
           placeHolder: 'e.g. 1818',
@@ -310,9 +392,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         });
         if (jobId === undefined) return;
         try {
-          buildJoinUri(placeId, jobId);
-          await profileStore.launchProfile(launcher, item.profile.name, placeId, jobId);
-          setTimeout(() => profilesProvider.refresh(), 500);
+          await launchWithFeedback(item.profile.name, placeId, jobId);
         } catch (err) {
           void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
         }

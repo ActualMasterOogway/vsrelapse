@@ -226,6 +226,11 @@
           "when": "view == relapse.sessions && viewItem == session"
         },
         {
+          "command": "relapse.openConsole",
+          "group": "inline",
+          "when": "view == relapse.profiles && viewItem == profileRunning"
+        },
+        {
           "command": "relapse.launchProfile",
           "group": "inline",
           "when": "view == relapse.profiles && viewItem == profile"
@@ -238,22 +243,22 @@
         {
           "command": "relapse.importCookie",
           "group": "2_account",
-          "when": "view == relapse.profiles && viewItem == profile"
+          "when": "view == relapse.profiles && viewItem =~ /^profile/"
         },
         {
           "command": "relapse.refreshAccount",
           "group": "2_account",
-          "when": "view == relapse.profiles && viewItem == profile"
+          "when": "view == relapse.profiles && viewItem =~ /^profile/"
         },
         {
           "command": "relapse.renameProfile",
           "group": "3_manage",
-          "when": "view == relapse.profiles && viewItem == profile"
+          "when": "view == relapse.profiles && viewItem =~ /^profile/"
         },
         {
           "command": "relapse.deleteProfile",
           "group": "3_manage",
-          "when": "view == relapse.profiles && viewItem == profile"
+          "when": "view == relapse.profiles && viewItem =~ /^profile/"
         },
         {
           "command": "relapse.newScript",

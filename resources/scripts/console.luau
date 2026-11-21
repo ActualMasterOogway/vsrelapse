@@ -97,11 +97,11 @@ local function resumeWith(thread, text)
 end
 
 local function finish(id, text)
-    local thread = waiting[id]
-    if not thread then return end
+    local entry = waiting[id]
+    if not entry then return end
     waiting[id] = nil
     pending -= 1
-    defer(resumeWith, thread, text)
+    defer(resumeWith, entry.thread, text)
 end
 
 local function finishAll()
@@ -133,17 +133,21 @@ function state.name(value)
     broadcast({ type = "title", text = title })
 end
 
-function state.input()
+function state.input(...)
     if pending >= 64 then return "" end
     local thread = running()
     if not thread or not hasPeers() then return "" end
+    local promptText = nil
+    if select("#", ...) > 0 then
+        promptText = format(...)
+    end
     repeat nextId = nextId % 2147483647 + 1 until not waiting[nextId]
     local id = nextId
-    waiting[id] = thread
+    waiting[id] = { thread = thread, prompt = promptText }
     pending += 1
     visible = true
     broadcast({ type = "show" })
-    if not broadcast({ type = "input", id = id }) then
+    if not broadcast({ type = "input", id = id, prompt = promptText }) then
         waiting[id] = nil
         pending -= 1
         return ""
@@ -176,7 +180,9 @@ function state.publish()
             connection:Close()
             return
         end
-        for id in waiting do send(connection, { type = "input", id = id }) end
+        for id, entry in waiting do
+            send(connection, { type = "input", id = id, prompt = entry.prompt })
+        end
     end)
 end
 

@@ -186,10 +186,21 @@ export class ProfileStore {
       stdio: 'ignore',
       env,
     });
-    child.on('error', () => {
-      // Prevent unhandled 'error' event in extension host if exec fails asynchronously
+    return await new Promise<number>((resolve, reject) => {
+      let settled = false;
+      child.once('error', (err) => {
+        if (!settled) {
+          settled = true;
+          reject(new Error(`Could not launch profile: ${err.message}`));
+        }
+      });
+      child.once('spawn', () => {
+        if (!settled) {
+          settled = true;
+          child.unref();
+          resolve(child.pid ?? 0);
+        }
+      });
     });
-    child.unref();
-    return child.pid ?? 0;
   }
 }

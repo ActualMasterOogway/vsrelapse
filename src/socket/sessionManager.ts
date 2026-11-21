@@ -300,7 +300,9 @@ export class SessionManager extends EventEmitter {
     consoleBridge.on('entry', (level: string, text: string) =>
       this.emit('consoleEntry', sockPath, level, text)
     );
-    consoleBridge.on('input', (id: number) => this.emit('consoleInput', sockPath, id));
+    consoleBridge.on('input', (id: number, prompt?: string) =>
+      this.emit('consoleInput', sockPath, id, prompt)
+    );
     consoleBridge.on('error', (detail: string) =>
       this.emit('entry', sockPath, 'error', `[console] ${detail}`)
     );

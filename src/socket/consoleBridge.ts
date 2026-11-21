@@ -182,11 +182,17 @@ export class ConsoleBridge extends EventEmitter {
       }
       this.emit('entry', obj.level, obj.text);
     } else if (type === 'input') {
-      if (typeof obj.id !== 'number' || !Number.isInteger(obj.id) || obj.id < 1 || obj.id > 0x7fffffff) {
+      if (
+        typeof obj.id !== 'number' ||
+        !Number.isInteger(obj.id) ||
+        obj.id < 1 ||
+        obj.id > 0x7fffffff ||
+        (obj.prompt !== undefined && (typeof obj.prompt !== 'string' || obj.prompt.length > 4096))
+      ) {
         this.fail('Invalid console channel message');
         return;
       }
-      this.emit('input', obj.id);
+      this.emit('input', obj.id, obj.prompt);
     } else {
       this.fail('Invalid console channel message');
     }

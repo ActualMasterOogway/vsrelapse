@@ -143,7 +143,7 @@ describe('SessionBridge and ConsoleBridge', () => {
               consoleConn = conn;
               conn.write(encodeFrame({ type: 'state', title: 'My Console', visible: true }));
               conn.write(encodeFrame({ type: 'print', level: 'info', text: 'ready!' }));
-              conn.write(encodeFrame({ type: 'input', id: 5 }));
+              conn.write(encodeFrame({ type: 'input', id: 5, prompt: 'enter a num: ' }));
             }
           } else if (channel === '@main' && msg.op === 'execute') {
             conn.write(encodeFrame({ type: 'exec_result', script_id: msg.script_id, phase: 'submitted' }));
@@ -171,8 +171,8 @@ describe('SessionBridge and ConsoleBridge', () => {
         client.on('execResult', (id: number, submitted: boolean, detail?: string) => {
           consoleBridge.handleExecResult(id, submitted, detail);
         });
-        consoleBridge.on('input', (id: number) => {
-          events.push(['input', id]);
+        consoleBridge.on('input', (id: number, prompt?: string) => {
+          events.push(['input', id, prompt]);
           assert.equal(consoleBridge.sendInput(id, 'hello'), true);
           resolve();
         });
@@ -184,7 +184,7 @@ describe('SessionBridge and ConsoleBridge', () => {
         ['title', 'My Console'],
         ['show', true],
         ['entry', 'info', 'ready!'],
-        ['input', 5],
+        ['input', 5, 'enter a num: '],
       ]);
       assert.deepEqual(consoleInputs, [{ op: 'input_response', id: 5, text: 'hello' }]);
     } finally {

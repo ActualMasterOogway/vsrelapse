@@ -69,8 +69,13 @@ class RelapseConsolePty implements vscode.Pseudoterminal {
     this.emitWrite(`${prefix}${normalized}${suffix}\r\n`);
   }
 
-  promptInput(): void {
-    this.emitWrite('\x1b[32m> \x1b[0m');
+  promptInput(prompt?: string): void {
+    if (prompt) {
+      const normalized = prompt.replace(/\r?\n/g, '\r\n');
+      this.emitWrite(`\x1b[32m> \x1b[0m${normalized}`);
+    } else {
+      this.emitWrite('\x1b[32m> \x1b[0m');
+    }
   }
 
   clear(): void {
@@ -136,11 +141,11 @@ export class ConsoleTerminalManager {
       st.pty?.writeLine(level, text);
     });
 
-    manager.on('consoleInput', (sockPath: string, id: number) => {
+    manager.on('consoleInput', (sockPath: string, id: number, prompt?: string) => {
       const st = this.ensureTerminal(sockPath, true);
       st.pendingInputId = id;
       st.lineBuffer = '';
-      st.pty?.promptInput();
+      st.pty?.promptInput(prompt);
     });
   }
 
