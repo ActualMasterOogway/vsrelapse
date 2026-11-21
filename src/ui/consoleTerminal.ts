@@ -16,6 +16,8 @@ class RelapseConsolePty implements vscode.Pseudoterminal {
   readonly onDidWrite = this.writeEmitter.event;
   readonly onDidClose = this.closeEmitter.event;
   readonly onDidChangeName = this.nameEmitter.event;
+  private opened = false;
+  private pendingWrites: string[] = [];
 
   constructor(
     private readonly onLine: (line: string) => void,
@@ -26,11 +28,29 @@ class RelapseConsolePty implements vscode.Pseudoterminal {
   ) {}
 
   open(): void {
+    this.opened = true;
     this.writeEmitter.fire('\x1b[90m[Relapse rconsole connected]\x1b[0m\r\n');
+    for (const chunk of this.pendingWrites) {
+      this.writeEmitter.fire(chunk);
+    }
+    this.pendingWrites = [];
   }
 
   close(): void {
+    this.opened = false;
+    this.pendingWrites = [];
+    this.writeEmitter.dispose();
+    this.closeEmitter.dispose();
+    this.nameEmitter.dispose();
     this.onClosed();
+  }
+
+  private emitWrite(chunk: string): void {
+    if (this.opened) {
+      this.writeEmitter.fire(chunk);
+    } else {
+      this.pendingWrites.push(chunk);
+    }
   }
 
   writeLine(level: string, text: string): void {
@@ -46,15 +66,18 @@ class RelapseConsolePty implements vscode.Pseudoterminal {
     } else {
       suffix = '';
     }
-    this.writeEmitter.fire(`${prefix}${normalized}${suffix}\r\n`);
+    this.emitWrite(`${prefix}${normalized}${suffix}\r\n`);
   }
 
   promptInput(): void {
-    this.writeEmitter.fire('\x1b[32m> \x1b[0m');
+    this.emitWrite('\x1b[32m> \x1b[0m');
   }
 
   clear(): void {
-    this.writeEmitter.fire('\x1b[2J\x1b[3J\x1b[H');
+    if (!this.opened) {
+      this.pendingWrites = [];
+    }
+    this.emitWrite('\x1b[2J\x1b[3J\x1b[H');
   }
 
   rename(title: string): void {
