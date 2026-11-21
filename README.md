@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="resources/icons/icon.png" alt="vsrelapse logo" width="84" height="84" />
+
 # vsrelapse
 
 VS Code extension for connecting to [Relapse](https://github.com/vpu00000/relapsegtk), executing Luau scripts across multiple sessions, capturing output, and managing accounts on Linux.
