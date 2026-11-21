@@ -1,0 +1,12 @@
+.git/**
+.github/**
+.gitignore
+.test-build/**
+.vscode/**
+node_modules/**
+src/**
+test/**
+esbuild.mjs
+tsconfig.json
+tsconfig.test.json
+*.vsix
