@@ -1,0 +1,49 @@
+{
+  "name": "vsrelapse",
+  "displayName": "Relapse",
+  "description": "VS Code-native Relapse script executor, output/rconsole bridge, and profile/account manager",
+  "version": "0.1.0",
+  "publisher": "ActualMasterOogway",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "test": "tsc -p tsconfig.test.json && node --test .test-build/test/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.95.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  },
+  "author": {
+    "name": "ActualMasterOogway",
+    "url": "https://github.com/ActualMasterOogway"
+  },
+  "license": "GPL-3.0-or-later",
+  "galleryBanner": {
+    "color": "#0d1117",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ActualMasterOogway/vsrelapse.git"
+  },
+  "homepage": "https://github.com/ActualMasterOogway/vsrelapse#readme",
+  "bugs": {
+    "url": "https://github.com/ActualMasterOogway/vsrelapse/issues"
+  },
+  "keywords": [
+    "relapse",
+    "roblox",
+    "luau",
+    "lua"
+  ]
+}
