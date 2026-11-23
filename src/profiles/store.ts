@@ -1,21 +1,14 @@
 import { execFile, spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
+import { configuration, profiles, type ConfigurationOptions } from 'relapsesdk';
 
 const execFileAsync = promisify(execFile);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export function defaultProfilesDir(): string {
-  return path.join(os.homedir(), '.local', 'share', 'relapse', 'profiles');
-}
-
-export function isValidProfileName(name: string): boolean {
-  if (!name || name === '.' || name === '..' || name.length > 64) return false;
-  return /^[A-Za-z0-9._-]+$/.test(name);
-}
+export const isValidProfileName = profiles.isValidName;
 
 export function buildJoinUri(placeId?: string, jobId?: string): string | null {
   const place = (placeId ?? '').trim();
@@ -37,61 +30,63 @@ export function buildJoinUri(placeId?: string, jobId?: string): string | null {
   return `roblox://placeId=${parsed.toString()}${job ? `&gameInstanceId=${job}` : ''}`;
 }
 
-export class ProfileStore {
-  readonly profilesDir: string;
-
-  constructor(profilesDir?: string) {
-    this.profilesDir = profilesDir ?? defaultProfilesDir();
+export async function withProfileLock<T>(dataDir: string, action: () => Promise<T>): Promise<T> {
+  await fs.mkdir(dataDir, { recursive: true, mode: 0o700 });
+  const lock = spawn('flock', ['-x', '-n', '-E', '73', path.join(dataDir, '.lock'),
+    'sh', '-c', 'printf ready; cat >/dev/null'], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const closed = new Promise<void>(resolve => lock.once('close', () => resolve()));
+  lock.stdin.on('error', () => {});
+  try {
+    await new Promise<void>((resolve, reject) => {
+      lock.once('error', reject);
+      lock.once('exit', code => reject(new Error(code === 73
+        ? 'Close this Profile before modifying it.'
+        : 'Could not lock the profile.')));
+      lock.stdout.once('data', () => resolve());
+    });
+    return await action();
+  } finally {
+    lock.stdin.end();
+    await closed;
   }
+}
 
-  profilePath(name: string): string {
-    if (!isValidProfileName(name)) {
-      throw new Error('Use 1–64 letters, digits, dots, underscores or hyphens (excluding . and ..).');
-    }
-    return path.join(this.profilesDir, name);
+export class ProfileStore {
+  constructor(readonly options: ConfigurationOptions = {}) {}
+
+  async profilePath(name: string): Promise<string> {
+    return (await profiles.paths(name, this.options)).dataDir;
   }
 
   async listProfiles(): Promise<string[]> {
-    let entries: string[];
-    try {
-      entries = await fs.readdir(this.profilesDir);
-    } catch {
-      return [];
-    }
-    const profiles: string[] = [];
-    for (const name of entries) {
-      if (!isValidProfileName(name)) continue;
-      try {
-        const st = await fs.lstat(path.join(this.profilesDir, name));
-        if (st.isDirectory()) profiles.push(name);
-      } catch {
-        // Ignore
+    const configured = await profiles.list(this.options);
+    const root = path.join(configuration.dataDirectory(this.options), 'profiles');
+    const used = new Set(configured.map(profile => path.resolve(profile.dataDir)));
+    const legacy = await fs.readdir(root, { withFileTypes: true }).catch(error => {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    });
+    const names = new Set(configured.map(profile => profile.name));
+    for (const entry of legacy) {
+      if (entry.isDirectory() && isValidProfileName(entry.name) && !used.has(path.join(root, entry.name))) {
+        names.add(entry.name);
       }
     }
-    return profiles.sort();
+    return [...names].sort();
   }
 
   async createProfile(name: string): Promise<void> {
-    const target = this.profilePath(name);
-    await fs.mkdir(this.profilesDir, { recursive: true, mode: 0o700 });
-    try {
-      await fs.mkdir(target, { mode: 0o700 });
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'EEXIST') {
-        throw new Error('Could not add Profile: this name already exists');
-      }
-      throw new Error(`Could not add Profile: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    await profiles.create(name, this.options);
   }
 
   async isProfileRunning(name: string): Promise<boolean> {
-    const profileDir = this.profilePath(name);
+    const profileDir = await this.profilePath(name);
     const lockPath = path.join(profileDir, '.lock');
     try {
       await fs.lstat(lockPath);
-    } catch {
-      return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
     }
     try {
       await execFileAsync('flock', ['-s', '-n', lockPath, 'true']);
@@ -99,58 +94,106 @@ export class ProfileStore {
     } catch (err) {
       const code = (err as { code?: number }).code;
       // flock exits 1 when -n fails to acquire lock
-      return code === 1;
+      if (code === 1) return true;
+      throw err;
     }
   }
 
   async renameProfile(name: string, replacement: string): Promise<void> {
-    const src = this.profilePath(name);
-    const dst = this.profilePath(replacement);
+    const dataDir = await this.profilePath(name);
+    const source = path.dirname(configuration.profilePath(name, this.options));
+    const destination = path.dirname(configuration.profilePath(replacement, this.options));
     if (name === replacement) return;
-    if (await this.isProfileRunning(name)) {
-      throw new Error('Close this Profile before renaming it.');
-    }
-    try {
-      await fs.access(dst);
-      throw new Error('Could not rename Profile: this name already exists');
-    } catch (err) {
-      if (err instanceof Error && err.message.includes('already exists')) throw err;
-    }
-    await fs.rename(src, dst);
+    await withProfileLock(dataDir, async () => {
+      if ((await this.listProfiles()).includes(replacement)) throw new Error('This profile name already exists.');
+      const config = await configuration.readProfile(name, this.options);
+      // Pin the data location so changing the profile name preserves its account and state.
+      await configuration.writeProfile(name, { ...config, dataDir }, this.options);
+      await fs.mkdir(destination, { mode: 0o700 });
+      try {
+        await fs.rename(source, destination);
+      } catch (error) {
+        await fs.rmdir(destination);
+        throw error;
+      }
+      try {
+        const global = await configuration.readGlobal(this.options);
+        if ((global.defaultProfile ?? 'Default') === name) {
+          await configuration.writeGlobal({ ...global, defaultProfile: replacement }, this.options);
+        }
+      } catch (error) {
+        await fs.rename(destination, source);
+        throw error;
+      }
+    });
   }
 
-  async prepareDeleteProfile(name: string): Promise<{
-    path: string;
-    restorePermissions: () => Promise<void>;
-  }> {
-    const profileDir = this.profilePath(name);
-    if (await this.isProfileRunning(name)) {
-      throw new Error('Close this profile before deleting it.');
-    }
-    const workDir = path.join(profileDir, 'state', 'assets-work', 'work');
-    let previousMode: number | null = null;
-    try {
-      const st = await fs.lstat(workDir);
-      const mode = st.mode & 0o7777;
-      if ((mode & 0o700) !== 0o700) {
-        previousMode = mode;
-        await fs.chmod(workDir, mode | 0o700);
-      }
-    } catch {
-      // No overlay work directory
-    }
-    return {
-      path: profileDir,
-      restorePermissions: async () => {
-        if (previousMode !== null) {
-          try {
-            await fs.chmod(workDir, previousMode);
-          } catch {
-            // Ignore if already trashed
-          }
-        }
-      },
+  async deleteProfile(name: string, trash: (target: string) => Promise<void>): Promise<void> {
+    const dataDir = await this.profilePath(name);
+    const configDir = path.dirname(configuration.profilePath(name, this.options));
+    const configRoot = configuration.configDirectory(this.options);
+    const dataRoot = configuration.dataDirectory(this.options);
+    const contains = (parent: string, child: string) => {
+      const relative = path.relative(parent, child);
+      return relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
     };
+    if (contains(dataDir, configRoot) || contains(dataDir, dataRoot)) {
+      throw new Error('The profile data directory contains shared Relapse files.');
+    }
+    await withProfileLock(dataDir, async () => {
+      const others = (await profiles.list(this.options)).filter(profile => profile.name !== name);
+      // A configured data directory can be shared by multiple profile names.
+      const shared = others.some(profile => path.resolve(profile.dataDir) === path.resolve(dataDir));
+      const nested = others.some(profile => path.resolve(profile.dataDir) !== path.resolve(dataDir)
+        && (contains(dataDir, profile.dataDir) || contains(profile.dataDir, dataDir)));
+      if (nested) throw new Error('Profile data directories overlap. Update their dataDir settings before deleting.');
+      const global = await configuration.readGlobal(this.options);
+      const isDefault = (global.defaultProfile ?? 'Default') === name;
+      const configExists = await fs.lstat(configDir).catch(error => {
+        if (error.code === 'ENOENT') return undefined;
+        throw error;
+      });
+      await fs.mkdir(configRoot, { recursive: true, mode: 0o700 });
+      const backup = await fs.mkdtemp(path.join(configRoot, '.delete-'));
+      const workDir = path.join(dataDir, 'state', 'assets-work', 'work');
+      let previousMode: number | undefined;
+      let configTrashed = false;
+      try {
+        if (configExists) await fs.cp(configDir, path.join(backup, 'config'), { recursive: true });
+        if (isDefault) {
+          const replacement = (await this.listProfiles()).find(profile => profile !== name) ?? 'Default';
+          await configuration.writeGlobal({ ...global, defaultProfile: replacement }, this.options);
+        }
+        if (configExists) {
+          await trash(configDir);
+          configTrashed = true;
+        }
+        if (!shared) {
+          const stat = await fs.lstat(workDir).catch(error => {
+            if (error.code === 'ENOENT') return undefined;
+            throw error;
+          });
+          if (stat && !stat.isSymbolicLink()) {
+            previousMode = stat.mode & 0o7777;
+            await fs.chmod(workDir, previousMode | 0o700);
+          }
+          const exists = await fs.lstat(dataDir).catch(error => {
+            if (error.code === 'ENOENT') return undefined;
+            throw error;
+          });
+          if (exists) await trash(dataDir);
+        }
+      } catch (error) {
+        if (configTrashed) {
+          await fs.cp(path.join(backup, 'config'), configDir, { recursive: true, force: false, errorOnExist: true });
+        }
+        if (previousMode !== undefined) await fs.chmod(workDir, previousMode);
+        if (isDefault) await configuration.writeGlobal(global, this.options);
+        throw error;
+      } finally {
+        await fs.rm(backup, { recursive: true, force: true });
+      }
+    });
   }
 
   async launchProfile(
@@ -159,7 +202,7 @@ export class ProfileStore {
     placeId?: string,
     jobId?: string
   ): Promise<number> {
-    this.profilePath(name);
+    await this.profilePath(name);
     if (!launcherPath || !path.isAbsolute(launcherPath)) {
       throw new Error('Select an executable launcher in Settings first.');
     }

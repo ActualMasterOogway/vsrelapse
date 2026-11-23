@@ -51,7 +51,7 @@ describe('SessionManager', () => {
             channel = String(msg.channel);
             conn.write(encodeFrame({ ok: true, version: 1, max_message_bytes: 1048576 }));
             if (channel === '@main') {
-              conn.write(encodeFrame({ type: 'hello', ready: true, session }));
+              conn.write(encodeFrame({ type: 'hello', pid: 1234, profile: 'default', ready: true, session }));
             }
           } else if (channel === '@main' && msg.op === 'execute') {
             executed.push(String(msg.name));
@@ -100,9 +100,9 @@ describe('SessionManager', () => {
       mgr.setTargeted(defaultSock, true);
       assert.equal(mgr.getTargetedPaths().length, 2);
 
-      const results = mgr.executeOnTargeted('hello.luau', 'print(1)');
+      const results = await mgr.executeOnTargeted('hello.luau', 'print(1)');
       assert.equal(results.length, 2);
-      assert.ok(results.every((r) => r.result === 'queued'));
+      assert.ok(results.every((r) => !r.error));
       await new Promise((r) => setTimeout(r, 20));
       assert.ok(execDefault.includes('vsrelapse-console.luau'));
       assert.ok(execDefault.includes('hello.luau'));

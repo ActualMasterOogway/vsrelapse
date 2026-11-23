@@ -44,13 +44,14 @@ npx @vscode/vsce package --allow-missing-repository
 - Supports `rconsolename`, `rconsoleclear`, `rconsoleshow`, `rconsolehide`, and `rconsoleinput(prompt?)`.
 
 ### Profiles and accounts
-- Manages profiles under `~/.local/share/relapse/profiles/<name>`: create, rename, and move to Trash.
+- Uses `relapsesdk` for profile discovery, creation, and configuration resolution, including XDG directories and custom `dataDir` paths.
+- Renaming updates the profile configuration and default selection while retaining its data directory. Moving a profile to Trash includes its configuration and unshared data.
 - Reads `.lock` with a non-blocking `flock` check to show live running status and prevent modifying active profiles.
 - Imports `.ROBLOSECURITY` cookies (raw token or full `Cookie:` header) into `state/app/data/sober/cookies`, fetches the Roblox username and headshot, and caches metadata in `account.json`.
 - Launches profiles detached (`--profile <name> --no-launch-ui`), with an optional Place ID and Job ID, while animating the sidebar row and status bar until the socket connects.
 
 ### Scripts and autoexec
-- Lists files from your configured scripts folder (`~/.local/share/relapse/scripts` by default) and `~/.config/relapse/autoexec`.
+- Lists files from your configured scripts folder (`~/.local/share/relapse/scripts` by default) and the autoexec directories resolved for targeted profiles. With no named targets, uses the configured default profile.
 - Click any file to open it, or run it directly from the sidebar.
 
 ## Shortcuts and commands
@@ -77,11 +78,16 @@ All commands live under the `Relapse:` prefix in the Command Palette (`F1`).
 
 ## Local data paths
 
-- Profiles: `~/.local/share/relapse/profiles/<name>`
-- Autoexec: `~/.config/relapse/autoexec`
+- Profile configuration defaults to `~/.config/relapse/profiles/<name>/config.json`.
+- Profile data defaults to `~/.local/share/relapse/profiles/<name>` and follows each profile’s `dataDir`.
+- Global settings come from `~/.config/relapse/config.json`, with per-profile overrides.
+- Autoexec defaults to `~/.config/relapse/autoexec`.
+- `XDG_CONFIG_HOME` and `XDG_DATA_HOME` override the corresponding roots. Existing data-only profiles are also discovered.
 - Sockets: `/tmp/relapse.sock` and `/tmp/relapse-<name>.sock`
 
 ## Development
+
+Build dependencies require Node 22 or newer. The SDK is bundled into the extension.
 
 ```sh
 npm run typecheck

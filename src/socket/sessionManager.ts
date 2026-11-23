@@ -1,8 +1,7 @@
 import { EventEmitter } from 'node:events';
-import * as fs from 'node:fs/promises';
-import * as net from 'node:net';
+import { listClients } from 'relapsesdk';
 import * as path from 'node:path';
-import { SocketClient, SocketClientSendResult, SocketClientState } from './client';
+import { SocketClient, SocketClientState } from './client';
 import { OutputState, SessionBridge } from './sessionBridge';
 import { ConsoleBridge } from './consoleBridge';
 
@@ -41,24 +40,6 @@ export function profileNameFromSocketPath(socketPath: string): string {
   return 'No Profile';
 }
 
-function isValidSocketProfileName(name: string): boolean {
-  return name !== '.' && name !== '..' && /^[A-Za-z0-9._-]{1,64}$/.test(name);
-}
-
-async function isSocketListening(socketPath: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const sock = net.createConnection(socketPath);
-    const done = (ok: boolean) => {
-      sock.removeAllListeners();
-      sock.destroy();
-      resolve(ok);
-    };
-    sock.once('connect', () => done(true));
-    sock.once('error', () => done(false));
-    sock.setTimeout(200, () => done(false));
-  });
-}
-
 export class SessionManager extends EventEmitter {
   private readonly socketDir: string;
   private readonly sessionScript: string;
@@ -71,6 +52,7 @@ export class SessionManager extends EventEmitter {
   private pollTimer: NodeJS.Timeout | null = null;
   private refreshing = false;
   private disposed = false;
+  private readonly shutdown = new AbortController();
 
   constructor(options: SessionManagerOptions) {
     super();
@@ -92,6 +74,7 @@ export class SessionManager extends EventEmitter {
 
   dispose(): void {
     this.disposed = true;
+    this.shutdown.abort();
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
@@ -122,7 +105,8 @@ export class SessionManager extends EventEmitter {
     if (this.disposed || this.refreshing) return;
     this.refreshing = true;
     try {
-      const discovered = await this.discoverSockets();
+      const clients = await listClients({ directory: this.socketDir, signal: this.shutdown.signal });
+      const discovered = clients.map(client => client.socketPath);
       if (this.disposed) return;
 
       const discoveredSet = new Set(discovered);
@@ -162,6 +146,8 @@ export class SessionManager extends EventEmitter {
       if (changed) {
         this.emit('sessionsChanged');
       }
+    } catch (error) {
+      if (!this.disposed) this.emit('entry', '', 'error', error instanceof Error ? error.message : String(error));
     } finally {
       this.refreshing = false;
     }
@@ -199,58 +185,23 @@ export class SessionManager extends EventEmitter {
     return Array.from(this.targeted).filter((p) => this.sessions.has(p));
   }
 
-  executeOnTargeted(
+  async executeOnTargeted(
     name: string,
     source: string
-  ): Array<{ path: string; name: string; result: SocketClientSendResult }> {
-    const targets = this.getTargetedPaths();
-    const results: Array<{ path: string; name: string; result: SocketClientSendResult }> = [];
-    for (const sockPath of targets) {
-      const entry = this.sessions.get(sockPath);
-      if (!entry) continue;
-      const result = entry.bridge.execute(name, source);
-      results.push({ path: sockPath, name: entry.name, result });
-    }
-    return results;
-  }
-
-  sendConsoleInput(socketPath: string, id: number, text: string): boolean {
-    const entry = this.sessions.get(socketPath);
-    if (!entry) return false;
-    return entry.console.sendInput(id, text);
-  }
-
-  private async discoverSockets(): Promise<string[]> {
-    let names: string[];
-    try {
-      names = await fs.readdir(this.socketDir);
-    } catch {
-      return [];
-    }
-
-    const uid = typeof process.getuid === 'function' ? process.getuid() : -1;
-    const candidates: string[] = [];
-
-    for (const name of names) {
-      if (name !== 'relapse.sock') {
-        if (!name.startsWith('relapse-') || !name.endsWith('.sock')) continue;
-        const profile = name.slice(8, -5);
-        if (!isValidSocketProfileName(profile)) continue;
-      }
-      const fullPath = path.join(this.socketDir, name);
+  ): Promise<Array<{ path: string; name: string; error?: string }>> {
+    return Promise.all(this.getTargetedPaths().map(async socketPath => {
+      const entry = this.sessions.get(socketPath)!;
       try {
-        const st = await fs.lstat(fullPath);
-        if (!st.isSocket()) continue;
-        if (uid >= 0 && st.uid !== uid) continue;
-        if (await isSocketListening(fullPath)) {
-          candidates.push(fullPath);
-        }
-      } catch {
-        // Skip disappearing/unreadable entries
+        await entry.bridge.execute(name, source);
+        return { path: socketPath, name: entry.name };
+      } catch (error) {
+        return { path: socketPath, name: entry.name, error: error instanceof Error ? error.message : String(error) };
       }
-    }
+    }));
+  }
 
-    return candidates.sort();
+  async sendConsoleInput(socketPath: string, id: number, text: string): Promise<boolean> {
+    return this.sessions.get(socketPath)?.console.sendInput(id, text) ?? false;
   }
 
   private addSession(sockPath: string): void {
@@ -276,14 +227,6 @@ export class SessionManager extends EventEmitter {
 
     client.on('error', (detail: string) => {
       this.emit('entry', sockPath, 'error', detail);
-    });
-
-    client.on('execResult', (id: number, submitted: boolean, detail?: string) => {
-      const handledByBridge = bridge.handleExecResult(id, submitted, detail);
-      const handledByConsole = consoleBridge.handleExecResult(id, submitted, detail);
-      if (!handledByBridge && !handledByConsole) {
-        this.emit('execResult', sockPath, id, submitted, detail);
-      }
     });
 
     bridge.on('stateChanged', () => {

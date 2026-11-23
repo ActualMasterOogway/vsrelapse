@@ -336,12 +336,15 @@
     "typecheck": "tsc --noEmit",
     "compile": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "test": "tsc -p tsconfig.test.json && node --test .test-build/test/*.test.js"
+    "test": "npm run typecheck && node esbuild.mjs --test && node --test .test-build/test/*.test.js"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/vscode": "^1.95.0",
     "esbuild": "^0.24.0",
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "relapsesdk": "^0.2.0"
   }
 }

@@ -1,16 +1,25 @@
 import * as esbuild from 'esbuild';
+import { readdir, rm } from 'node:fs/promises';
 
 const watch = process.argv.includes('--watch');
+const test = process.argv.includes('--test');
+if (test) await rm('.test-build', { recursive: true, force: true });
 
 const ctx = await esbuild.context({
-  entryPoints: ['src/extension.ts'],
+  entryPoints: test
+    ? (await readdir('test'))
+      .filter(name => name.endsWith('.test.ts'))
+      .map(name => `test/${name}`)
+      .concat('test/e2e/suite.ts')
+    : ['src/extension.ts'],
   bundle: true,
   format: 'cjs',
-  minify: !watch,
-  sourcemap: watch,
+  minify: !watch && !test,
+  sourcemap: watch || test,
   sourcesContent: false,
   platform: 'node',
-  outfile: 'dist/extension.js',
+  target: 'node20',
+  ...(test ? { outdir: '.test-build', outbase: '.' } : { outfile: 'dist/extension.js' }),
   external: ['vscode'],
   logLevel: 'info',
 });

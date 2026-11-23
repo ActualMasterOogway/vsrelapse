@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { configuration } from 'relapsesdk';
 import { AccountStore } from './profiles/account';
 import { buildJoinUri, isValidProfileName, ProfileStore } from './profiles/store';
 import { profileNameFromSocketPath, SessionManager } from './socket/sessionManager';
@@ -67,14 +68,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
 
-  manager.on('execResult', (sockPath: string, _id: number, submitted: boolean, detail?: string) => {
-    if (!submitted) {
-      const name = profileNameFromSocketPath(sockPath);
-      outputChannel.error(`[${name}] Execution failed: ${detail ?? 'unknown error'}`);
-      void vscode.window.showErrorMessage(`Relapse (${name}): ${detail ?? 'Execution failed'}`);
-    }
-  });
-
   // TreeViews
   const sessionsProvider = new SessionsTreeProvider(manager);
   const sessionsView = vscode.window.createTreeView('relapse.sessions', {
@@ -99,8 +92,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.window.registerTreeDataProvider('relapse.profiles', profilesProvider)
   );
 
-  const scriptsProvider = new ScriptsTreeProvider(() =>
-    getConfig().get<string>('scriptsDir', '~/.local/share/relapse/scripts')
+  const scriptsProvider = new ScriptsTreeProvider(
+    () => getConfig().get<string>('scriptsDir', '~/.local/share/relapse/scripts'),
+    () => manager.listSessions()
+      .filter(session => session.targeted && session.name !== 'No Profile')
+      .map(session => session.name)
   );
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('relapse.scripts', scriptsProvider)
@@ -136,8 +132,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   manager.on('sessionsChanged', () => {
     updateStatusBar();
     profilesProvider.refresh();
+    scriptsProvider.refresh();
   });
   updateStatusBar();
+
+  const configWatcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(configuration.configDirectory(), '**/config.json')
+  );
+  const refreshConfiguration = () => {
+    profilesProvider.refresh();
+    scriptsProvider.refresh();
+  };
+  context.subscriptions.push(configWatcher,
+    configWatcher.onDidCreate(refreshConfiguration),
+    configWatcher.onDidChange(refreshConfiguration),
+    configWatcher.onDidDelete(refreshConfiguration));
 
   // Configuration changes
   context.subscriptions.push(
@@ -164,10 +173,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       );
       return;
     }
-    const results = manager.executeOnTargeted(name, source);
-    const failed = results.filter((r) => r.result !== 'queued');
+    const results = await manager.executeOnTargeted(name, source);
+    const failed = results.filter((r) => r.error);
     if (failed.length > 0) {
-      const msg = failed.map((f) => `${f.name}: ${f.result}`).join(', ');
+      for (const failure of failed) {
+        outputChannel.error(`[${failure.name}] Execution failed: ${failure.error}`);
+      }
+      const msg = failed.map((f) => `${f.name}: ${f.error}`).join(', ');
       void vscode.window.showWarningMessage(`Relapse execution issue: ${msg}`);
     }
   };
@@ -473,16 +485,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       );
       if (confirm !== 'Move to Trash') return;
       try {
-        const prep = await profileStore.prepareDeleteProfile(item.profile.name);
-        try {
-          await vscode.workspace.fs.delete(vscode.Uri.file(prep.path), {
-            recursive: true,
-            useTrash: true,
-          });
-        } catch (err) {
-          await prep.restorePermissions();
-          throw err;
-        }
+        await profileStore.deleteProfile(item.profile.name, async target => {
+          await vscode.workspace.fs.delete(vscode.Uri.file(target), { recursive: true, useTrash: true });
+        });
         profilesProvider.refresh();
       } catch (err) {
         void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));

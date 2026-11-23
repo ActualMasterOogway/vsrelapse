@@ -1,20 +1,19 @@
 import { EventEmitter } from 'node:events';
-import { RelapseSocket } from './transport';
-import { SocketClient, SocketClientSendResult } from './client';
+import { type Channel, RelapseError } from 'relapsesdk';
+import { SocketClient } from './client';
 
 export type OutputState = 'off' | 'waiting' | 'connecting' | 'active' | 'failed';
 
 const CHANNEL_NAME = 'vsrelapse.session.v2';
 const VALID_LEVELS = new Set(['print', 'warn', 'error', 'info']);
-const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 
 export class SessionBridge extends EventEmitter {
   private readonly client: SocketClient;
   private readonly sessionScript: string;
-  private channel: RelapseSocket | null = null;
+  private channel: Channel | null = null;
+  private opening = false;
+  private setup = new AbortController();
   private timer: NodeJS.Timeout | null = null;
-  private readonly requests = new Set<number>();
-  private requestId = 0;
   private session = 0;
   private deadline = 0;
   private state: OutputState = 'off';
@@ -46,34 +45,25 @@ export class SessionBridge extends EventEmitter {
     this.start();
   }
 
-  handleExecResult(id: number, submitted: boolean, detail?: string): boolean {
-    if (!this.requests.delete(id)) return false;
-    if (id === this.requestId && !submitted) {
-      this.fail(detail || 'UI channel setup failed.');
-    }
-    return true;
-  }
-
   isReady(): boolean {
     return (
       this.client.isReady() &&
-      (!this.enabled || (this.ready && this.channel?.getState() === 'open'))
+      (!this.enabled || (this.ready && (this.channel?.connected ?? false)))
     );
   }
 
-  execute(name: string, source: string): SocketClientSendResult {
-    if (!this.isReady()) return 'not_ready';
+  async execute(name: string, source: string): Promise<void> {
+    if (!this.isReady()) throw new RelapseError('not_ready', 'Output channel is not ready.');
     if (!this.enabled) {
-      return this.client.execute(name, source).result;
+      return this.client.execute(name, source);
     }
     const safeName = name && Buffer.byteLength(name, 'utf8') <= 255 ? name : 'editor.luau';
     const script = `getgenv().__vsrelapse_session_v2.execute(${encodeLuaString(source)},${encodeLuaString(safeName)})`;
-    return this.client.execute('vsrelapse-execute.luau', script).result;
+    return this.client.execute('vsrelapse-execute.luau', script);
   }
 
   dispose(): void {
     this.stop();
-    this.requests.clear();
     this.removeAllListeners();
   }
 
@@ -90,13 +80,15 @@ export class SessionBridge extends EventEmitter {
   }
 
   private stop(): void {
+    this.setup.abort();
+    this.setup = new AbortController();
+    this.opening = false;
     this.cancelTimer();
     if (this.channel) {
       this.channel.removeAllListeners();
       this.channel.close();
       this.channel = null;
     }
-    this.requestId = 0;
     this.ready = false;
   }
 
@@ -116,78 +108,56 @@ export class SessionBridge extends EventEmitter {
       return;
     }
 
-    const exec = this.client.execute('vsrelapse-session.luau', this.sessionScript);
-    if (exec.result !== 'queued' || exec.scriptId === undefined) {
-      this.fail('Could not start the UI channel. Toggle redirection to retry.');
-      return;
-    }
-    this.requestId = exec.scriptId;
-    if (this.requests.size >= 256) this.requests.clear();
-    this.requests.add(this.requestId);
-
-    const channel = new RelapseSocket();
-    channel.on('open', () => this.configure());
-    channel.on('message', (data: Buffer) => this.onMessage(data));
-    channel.on('close', () => {
-      if (this.ready) {
-        this.ready = false;
-        this.deadline = Date.now() + 10_000;
-        this.setState('connecting', 'Reconnecting…');
-        this.startTimer();
-      }
+    const { signal } = this.setup;
+    void this.client.execute('vsrelapse-session.luau', this.sessionScript, { signal }).catch(error => {
+      if (!signal.aborted) this.fail(error instanceof Error ? error.message : String(error));
     });
-    this.channel = channel;
     this.deadline = Date.now() + 10_000;
     this.setState('connecting', 'Starting UI channel…');
     this.startTimer();
-    this.tick();
+    void this.tick();
   }
 
   private startTimer(): void {
     this.cancelTimer();
-    this.timer = setInterval(() => this.tick(), 250);
+    this.timer = setInterval(() => void this.tick(), 250);
   }
 
-  private tick(): void {
-    if (this.ready || !this.channel) return;
+  private async tick(): Promise<void> {
+    if (this.ready) return;
     if (Date.now() >= this.deadline) {
-      this.fail('UI channel setup timed out. Toggle redirection to retry.');
+      this.fail('UI channel setup timed out');
       return;
     }
-    if (this.channel.getState() === 'closed') {
-      try {
-        this.channel.connect(this.client.getPath(), CHANNEL_NAME);
-      } catch {
-        // Retry on next tick until deadline
-      }
-    }
-  }
-
-  private configure(): void {
-    if (!this.channel) return;
-    const msg = JSON.stringify({ op: 'configure', version: 2, redirect: this.enabled });
-    this.ready = false;
-    if (this.channel.send(msg) !== 'queued') {
-      this.fail('Could not configure the UI channel. Toggle redirection to retry.');
-      return;
-    }
-    this.deadline = Date.now() + 10_000;
-    this.setState('connecting', 'Connecting…');
-    this.startTimer();
-  }
-
-  private onMessage(data: Buffer): void {
-    if (data.length === 0 || data.length > 1024 * 1024 || data.includes(0)) {
-      this.fail('Invalid UI channel message. Toggle redirection to retry.');
-      return;
-    }
-    let parsed: unknown;
+    if (this.opening || this.channel?.connected) return;
+    const { signal } = this.setup;
+    this.opening = true;
     try {
-      parsed = JSON.parse(utf8Decoder.decode(data));
+      const channel = await this.client.openChannel(CHANNEL_NAME, { signal });
+      if (signal.aborted) {
+        channel.close();
+        return;
+      }
+      this.channel = channel;
+      channel.on('message', message => this.onMessage(message));
+      channel.on('close', () => {
+        this.channel = null;
+        if (this.ready) {
+          this.ready = false;
+          this.deadline = Date.now() + 10_000;
+          this.setState('connecting', 'Reconnecting…');
+          this.startTimer();
+        }
+      });
+      await channel.send({ op: 'configure', version: 2, redirect: this.enabled });
     } catch {
-      this.fail('Invalid UI channel message. Toggle redirection to retry.');
-      return;
+      // The bootstrap script may still be registering its channel. Retry until the deadline.
+    } finally {
+      if (!signal.aborted) this.opening = false;
     }
+  }
+
+  private onMessage(parsed: unknown): void {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       this.fail('Invalid UI channel message. Toggle redirection to retry.');
       return;

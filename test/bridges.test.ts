@@ -57,7 +57,7 @@ describe('SessionBridge and ConsoleBridge', () => {
             channel = String(msg.channel);
             conn.write(encodeFrame({ ok: true, version: 1, max_message_bytes: 1048576 }));
             if (channel === '@main') {
-              conn.write(encodeFrame({ type: 'hello', ready: true, session: 9 }));
+              conn.write(encodeFrame({ type: 'hello', pid: 1234, profile: 'default', ready: true, session: 9 }));
             } else if (channel === 'vsrelapse.session.v2') {
               sessionConn = conn;
             }
@@ -83,9 +83,6 @@ describe('SessionBridge and ConsoleBridge', () => {
         client.on('stateChanged', (s: string) => {
           if (s === 'ready') bridge.sync();
         });
-        client.on('execResult', (id: number, submitted: boolean, detail?: string) => {
-          bridge.handleExecResult(id, submitted, detail);
-        });
         bridge.on('stateChanged', (s: string) => {
           if (s === 'active') resolve();
         });
@@ -109,8 +106,7 @@ describe('SessionBridge and ConsoleBridge', () => {
         { level: 'warn', text: '2 messages dropped: output arrived too quickly.' },
       ]);
 
-      const execRes = bridge.execute('my.luau', 'print("hi—🔥\n")');
-      assert.equal(execRes, 'queued');
+      await bridge.execute('my.luau', 'print("hi—🔥\n")');
       await new Promise((r) => setTimeout(r, 20));
       assert.equal(mainExecs[1].name, 'vsrelapse-execute.luau');
       assert.equal(
@@ -138,7 +134,7 @@ describe('SessionBridge and ConsoleBridge', () => {
             channel = String(msg.channel);
             conn.write(encodeFrame({ ok: true, version: 1, max_message_bytes: 1048576 }));
             if (channel === '@main') {
-              conn.write(encodeFrame({ type: 'hello', ready: true, session: 12 }));
+              conn.write(encodeFrame({ type: 'hello', pid: 1234, profile: 'default', ready: true, session: 12 }));
             } else if (channel === 'vsrelapse.console.v1') {
               consoleConn = conn;
               conn.write(encodeFrame({ type: 'state', title: 'My Console', visible: true }));
@@ -168,12 +164,9 @@ describe('SessionBridge and ConsoleBridge', () => {
         client.on('stateChanged', (s: string) => {
           if (s === 'ready') consoleBridge.sync();
         });
-        client.on('execResult', (id: number, submitted: boolean, detail?: string) => {
-          consoleBridge.handleExecResult(id, submitted, detail);
-        });
-        consoleBridge.on('input', (id: number, prompt?: string) => {
+        consoleBridge.on('input', async (id: number, prompt?: string) => {
           events.push(['input', id, prompt]);
-          assert.equal(consoleBridge.sendInput(id, 'hello'), true);
+          assert.equal(await consoleBridge.sendInput(id, 'hello'), true);
           resolve();
         });
         client.start();

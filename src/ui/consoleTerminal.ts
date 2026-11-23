@@ -184,7 +184,7 @@ export class ConsoleTerminalManager {
           if (st.pendingInputId !== null) {
             const id = st.pendingInputId;
             st.pendingInputId = null;
-            this.manager.sendConsoleInput(sockPath, id, line);
+            void this.manager.sendConsoleInput(sockPath, id, line);
           }
         },
         () => {

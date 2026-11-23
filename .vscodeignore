@@ -8,5 +8,4 @@ src/**
 test/**
 esbuild.mjs
 tsconfig.json
-tsconfig.test.json
 *.vsix
