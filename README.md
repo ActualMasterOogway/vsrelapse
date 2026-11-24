@@ -19,7 +19,7 @@ VS Code extension for connecting to [Relapse](https://github.com/vpu00000/relaps
 Download the `.vsix` from the [latest release](https://github.com/ActualMasterOogway/vsrelapse/releases/latest) and install it into Code Insiders or VS Code:
 
 ```sh
-code-insiders --install-extension vsrelapse-0.1.0.vsix
+code-insiders --install-extension vsrelapse-0.2.0.vsix
 ```
 
 To build from source instead:
@@ -27,7 +27,7 @@ To build from source instead:
 ```sh
 npm install
 npm run compile
-npx @vscode/vsce package --allow-missing-repository
+npx @vscode/vsce package
 ```
 
 ## Features
