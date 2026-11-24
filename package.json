@@ -178,6 +178,24 @@
         "category": "Relapse",
         "title": "Delete Script",
         "icon": "$(trash)"
+      },
+      {
+        "command": "relapse.openGlobalConfig",
+        "category": "Relapse",
+        "title": "Open Global Config",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "relapse.openProfileConfig",
+        "category": "Relapse",
+        "title": "Open Profile Config",
+        "icon": "$(settings)"
+      },
+      {
+        "command": "relapse.copyJoinUri",
+        "category": "Relapse",
+        "title": "Copy Join URI",
+        "icon": "$(clippy)"
       }
     ],
     "keybindings": [
@@ -233,6 +251,11 @@
           "when": "view == relapse.profiles"
         },
         {
+          "command": "relapse.openGlobalConfig",
+          "group": "navigation",
+          "when": "view == relapse.profiles"
+        },
+        {
           "command": "relapse.refreshProfiles",
           "group": "navigation",
           "when": "view == relapse.profiles"
@@ -247,7 +270,12 @@
         {
           "command": "relapse.openConsole",
           "group": "inline",
-          "when": "view == relapse.sessions && viewItem == session"
+          "when": "view == relapse.sessions && viewItem =~ /^session/"
+        },
+        {
+          "command": "relapse.copyJoinUri",
+          "group": "1_session",
+          "when": "view == relapse.sessions && viewItem == sessionInGame"
         },
         {
           "command": "relapse.openConsole",
@@ -276,6 +304,11 @@
         },
         {
           "command": "relapse.renameProfile",
+          "group": "3_manage",
+          "when": "view == relapse.profiles && viewItem =~ /^profile/"
+        },
+        {
+          "command": "relapse.openProfileConfig",
           "group": "3_manage",
           "when": "view == relapse.profiles && viewItem =~ /^profile/"
         },
@@ -342,9 +375,7 @@
     "@types/node": "^22.10.0",
     "@types/vscode": "^1.95.0",
     "esbuild": "^0.24.0",
+    "relapsesdk": "^0.2.0",
     "typescript": "^5.7.0"
-  },
-  "dependencies": {
-    "relapsesdk": "^0.2.0"
   }
 }

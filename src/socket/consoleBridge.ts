@@ -4,6 +4,13 @@ import { SocketClient } from './client';
 
 const CHANNEL_NAME = 'vsrelapse.console.v1';
 const VALID_LEVELS = new Set(['print', 'warn', 'error', 'info']);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface ConsolePlace {
+  placeId: string;
+  jobId: string;
+  name?: string;
+}
 
 export class ConsoleBridge extends EventEmitter {
   private readonly client: SocketClient;
@@ -15,11 +22,16 @@ export class ConsoleBridge extends EventEmitter {
   private session = 0;
   private deadline = 0;
   private ready = false;
+  private place: ConsolePlace | null = null;
 
   constructor(client: SocketClient, consoleScript: string) {
     super();
     this.client = client;
     this.consoleScript = consoleScript;
+  }
+
+  getPlace(): ConsolePlace | null {
+    return this.place;
   }
 
   sync(): void {
@@ -38,6 +50,18 @@ export class ConsoleBridge extends EventEmitter {
       return true;
     } catch (error) {
       this.emit('error', error instanceof Error ? error.message : String(error));
+      return false;
+    }
+  }
+
+  async sendClosed(): Promise<boolean> {
+    if (!this.ready || !this.channel || !this.channel.connected) {
+      return false;
+    }
+    try {
+      await this.channel.send({ op: 'closed' });
+      return true;
+    } catch {
       return false;
     }
   }
@@ -65,6 +89,10 @@ export class ConsoleBridge extends EventEmitter {
       this.channel = null;
     }
     this.ready = false;
+    if (this.place !== null) {
+      this.place = null;
+      this.emit('place', null);
+    }
   }
 
   private fail(detail: string): void {
@@ -111,6 +139,11 @@ export class ConsoleBridge extends EventEmitter {
         this.channel = null;
         if (this.ready) {
           this.ready = false;
+          if (this.place !== null) {
+            this.place = null;
+            this.emit('place', null);
+          }
+          this.emit('destroy');
           this.deadline = Date.now() + 10_000;
           this.startTimer();
         }
@@ -156,6 +189,26 @@ export class ConsoleBridge extends EventEmitter {
       this.emit('title', obj.text);
     } else if (type === 'clear') {
       this.emit('clear');
+    } else if (type === 'destroy') {
+      this.emit('destroy');
+    } else if (type === 'place') {
+      const placeId = typeof obj.placeId === 'string' ? obj.placeId : null;
+      const jobId = typeof obj.jobId === 'string' ? obj.jobId : null;
+      const name = typeof obj.name === 'string' ? obj.name : undefined;
+      if (
+        placeId &&
+        /^[1-9][0-9]*$/.test(placeId) &&
+        BigInt(placeId) <= 9223372036854775807n &&
+        jobId &&
+        UUID_RE.test(jobId)
+      ) {
+        const cleanName =
+          name && name.length <= 255 && !/[\r\n\t]/.test(name) ? name : undefined;
+        this.place = { placeId, jobId, name: cleanName };
+      } else {
+        this.place = null;
+      }
+      this.emit('place', this.place);
     } else if (type === 'print') {
       if (
         typeof obj.level !== 'string' ||

@@ -50,6 +50,9 @@ export async function run(): Promise<void> {
     'relapse.refreshScripts',
     'relapse.newScript',
     'relapse.deleteScript',
+    'relapse.openGlobalConfig',
+    'relapse.openProfileConfig',
+    'relapse.copyJoinUri',
   ];
   for (const cmd of expectedCommands) {
     assert.ok(commands.includes(cmd), `Command ${cmd} should be registered`);
@@ -109,6 +112,10 @@ export async function run(): Promise<void> {
     assert.ok(
       executedNames.includes('vsrelapse-console.luau'),
       `Expected vsrelapse-console.luau bootstrap, got: ${JSON.stringify(executedNames)}`
+    );
+    assert.ok(
+      executedNames.includes('vsrelapse-dialogs.luau'),
+      `Expected vsrelapse-dialogs.luau bootstrap, got: ${JSON.stringify(executedNames)}`
     );
     assert.ok(
       executedSources.some((s) => s.includes('hello from code-insiders')),

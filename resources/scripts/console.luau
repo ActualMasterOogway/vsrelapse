@@ -91,6 +91,39 @@ local function broadcast(message)
     return active
 end
 
+local currentPlace, placeName
+
+local function reportPlace(connection)
+    local place, job = game.PlaceId, game.JobId
+    local message = { type = "place" }
+    if place > 0 and job ~= "" then
+        message.placeId = string.format("%.0f", place)
+        message.jobId = job
+        if currentPlace == place then message.name = placeName end
+    end
+    if connection then send(connection, message) else broadcast(message) end
+    if currentPlace == place then return end
+    currentPlace, placeName = place, nil
+    if place <= 0 then return end
+    defer(function()
+        local ok, info = safeCall(function()
+            return game:GetService("MarketplaceService"):GetProductInfoAsync(place, Enum.InfoType.Asset)
+        end)
+        if ok and currentPlace == place and game.PlaceId == place and
+            type(info) == "table" and type(info.Name) == "string" and info.Name ~= "" then
+            placeName = bounded(info.Name, 255)
+            reportPlace()
+        end
+    end)
+end
+
+local function placeChanged()
+    if hasPeers() then defer(reportPlace) end
+end
+
+game:GetPropertyChangedSignal("PlaceId"):Connect(placeChanged)
+game:GetPropertyChangedSignal("JobId"):Connect(placeChanged)
+
 local function resumeWith(thread, text)
     local ok, failure = resume(thread, text)
     if not ok then raise(failure, 0) end
@@ -121,6 +154,13 @@ function state.hide()
     finishAll()
     visible = false
     broadcast({ type = "hide" })
+end
+
+function state.destroy()
+    finishAll()
+    visible = false
+    title = "Relapse Console"
+    broadcast({ type = "destroy" })
 end
 
 function state.clear()
@@ -166,6 +206,10 @@ function state.publish()
             if not hasPeers() then finishAll() end
         end)
         connection.MessageReceived:Connect(function(message)
+            if type(message) == "table" and message.op == "closed" then
+                state.hide()
+                return
+            end
             if type(message) ~= "table" or message.op ~= "input_response" or
                 type(message.id) ~= "number" or message.id % 1 ~= 0 or
                 message.id < 1 or message.id > 2147483647 or
@@ -180,6 +224,7 @@ function state.publish()
             connection:Close()
             return
         end
+        reportPlace(connection)
         for id, entry in waiting do
             send(connection, { type = "input", id = id, prompt = entry.prompt })
         end
@@ -193,6 +238,10 @@ env.rconsoleerr = function(...) emit("error", ...) end
 env.rconsoleinput = state.input
 env.rconsoleclear = state.clear
 env.rconsolename = state.name
+env.rconsolesettitle = state.name
+env.rconsolecreate = state.show
+env.rconsoledestroy = state.destroy
+env.rconsolehidden = function() return not visible end
 env.rconsolehide = state.hide
 env.rconsoleshow = state.show
 env[key] = state

@@ -59,7 +59,20 @@ export class ProfileStore {
   }
 
   async listProfiles(): Promise<string[]> {
-    const configured = await profiles.list(this.options);
+    const configProfilesRoot = path.join(configuration.configDirectory(this.options), 'profiles');
+    const configuredEntries = await fs.readdir(configProfilesRoot, { withFileTypes: true }).catch(error => {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    });
+    const configured: Array<{ name: string; dataDir: string }> = [];
+    for (const entry of configuredEntries) {
+      if (!entry.isDirectory() || !isValidProfileName(entry.name)) continue;
+      try {
+        configured.push(await profiles.get(entry.name, this.options));
+      } catch {
+        // Keep listing valid profiles even if one profile's config.json is malformed
+      }
+    }
     const root = path.join(configuration.dataDirectory(this.options), 'profiles');
     const used = new Set(configured.map(profile => path.resolve(profile.dataDir)));
     const legacy = await fs.readdir(root, { withFileTypes: true }).catch(error => {
@@ -140,7 +153,11 @@ export class ProfileStore {
     if (contains(dataDir, configRoot) || contains(dataDir, dataRoot)) {
       throw new Error('The profile data directory contains shared Relapse files.');
     }
-    await withProfileLock(dataDir, async () => {
+    const dataExists = await fs.lstat(dataDir).then(() => true, error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    });
+    const runDelete = async () => {
       const others = (await profiles.list(this.options)).filter(profile => profile.name !== name);
       // A configured data directory can be shared by multiple profile names.
       const shared = others.some(profile => path.resolve(profile.dataDir) === path.resolve(dataDir));
@@ -168,7 +185,7 @@ export class ProfileStore {
           await trash(configDir);
           configTrashed = true;
         }
-        if (!shared) {
+        if (!shared && dataExists) {
           const stat = await fs.lstat(workDir).catch(error => {
             if (error.code === 'ENOENT') return undefined;
             throw error;
@@ -193,7 +210,12 @@ export class ProfileStore {
       } finally {
         await fs.rm(backup, { recursive: true, force: true });
       }
-    });
+    };
+    if (dataExists) {
+      await withProfileLock(dataDir, runDelete);
+    } else {
+      await runDelete();
+    }
   }
 
   async launchProfile(

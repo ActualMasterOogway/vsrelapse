@@ -143,21 +143,24 @@ export class AccountStore {
   }
 
   async saveAccount(name: string, account: ProfileAccount): Promise<void> {
-    const accountPath = path.join(await this.profileDir(name), 'account.json');
-    const payload: Record<string, unknown> = {
-      version: 1,
-      user_id: account.userId,
-      username: account.username,
-      display_name: account.displayName,
-      checked_at: account.checkedAt,
-      cookie_sha256: account.cookieHash,
-    };
-    if (account.avatarBase64) {
-      payload.avatar_png_base64 = account.avatarBase64;
-    }
-    await fs.writeFile(accountPath, JSON.stringify(payload, null, 2), {
-      encoding: 'utf8',
-      mode: 0o600,
+    const dataDir = await this.profileDir(name);
+    await withProfileLock(dataDir, async () => {
+      const accountPath = path.join(dataDir, 'account.json');
+      const payload: Record<string, unknown> = {
+        version: 1,
+        user_id: account.userId,
+        username: account.username,
+        display_name: account.displayName,
+        checked_at: account.checkedAt,
+        cookie_sha256: account.cookieHash,
+      };
+      if (account.avatarBase64) {
+        payload.avatar_png_base64 = account.avatarBase64;
+      }
+      await fs.writeFile(accountPath, JSON.stringify(payload, null, 2), {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
     });
   }
 
@@ -182,7 +185,12 @@ export class AccountStore {
       if (error.code === 'ENOENT') return undefined;
       throw error;
     });
-    if (marker !== undefined) return;
+    if (marker !== undefined) {
+      if (marker.trim() !== '1') {
+        throw new Error('Unrecognized profile layout.');
+      }
+      return;
+    }
     const directories = ['app', 'app/data', 'app/data/sober', 'app/data/sober/appData',
       'app/config', 'app/config/sober', 'app/cache', 'app/.local', 'app/.local/state', 'assets', 'assets-work'];
     // Older cookie imports could leave just state/app/data/sober/cookies before first launch.

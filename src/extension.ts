@@ -5,6 +5,7 @@ import { configuration } from 'relapsesdk';
 import { AccountStore } from './profiles/account';
 import { buildJoinUri, isValidProfileName, ProfileStore } from './profiles/store';
 import { profileNameFromSocketPath, SessionManager } from './socket/sessionManager';
+import type { DialogRequest } from './socket/dialogBridge';
 import { ConsoleTerminalManager } from './ui/consoleTerminal';
 import { ProfilesTreeProvider, ProfileTreeItem } from './ui/profilesView';
 import {
@@ -28,6 +29,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     path.join(context.extensionPath, 'resources', 'scripts', 'console.luau'),
     'utf8'
   );
+  const dialogScript = await fs.readFile(
+    path.join(context.extensionPath, 'resources', 'scripts', 'dialogs.luau'),
+    'utf8'
+  );
 
   const outputChannel = vscode.window.createOutputChannel('Relapse', { log: true });
   context.subscriptions.push(outputChannel);
@@ -36,6 +41,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const manager = new SessionManager({
     sessionScript,
     consoleScript,
+    dialogScript,
     redirectOutput: cfg.get<boolean>('redirectOutput', true),
     autoTargetFirst: cfg.get<boolean>('autoTargetFirst', true),
   });
@@ -55,7 +61,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Log output routing
   manager.on('entry', (sockPath: string, level: string, text: string) => {
     const multi = manager.listSessions().length > 1;
-    const prefix = multi ? `[${profileNameFromSocketPath(sockPath)}] ` : '';
+    const prefix = sockPath && multi ? `[${profileNameFromSocketPath(sockPath)}] ` : '';
     const line = `${prefix}${text}`;
     if (level === 'error') {
       outputChannel.error(line);
@@ -65,6 +71,49 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       outputChannel.info(line);
     } else {
       outputChannel.appendLine(line);
+    }
+  });
+
+  // In-game messagebox / MessageBox dialogs (vsrelapse.dialogs.v1)
+  const activeDialogs = new Map<string, { cancelled: boolean }>();
+  manager.on('dialogOpen', (sockPath: string, req: DialogRequest) => {
+    const key = `${sockPath}:${req.id}`;
+    const tracker = { cancelled: false };
+    activeDialogs.set(key, tracker);
+
+    const sessionName = profileNameFromSocketPath(sockPath);
+    const titlePrefix = req.title && req.title !== 'Relapse' ? `${req.title} (${sessionName})` : `Relapse (${sessionName})`;
+    const message = req.text ? `${titlePrefix}\n\n${req.text}` : titlePrefix;
+    const items: vscode.MessageItem[] = req.buttons.map((title) => ({ title }));
+    const picker =
+      req.icon === 'error'
+        ? vscode.window.showErrorMessage
+        : req.icon === 'warning'
+          ? vscode.window.showWarningMessage
+          : vscode.window.showInformationMessage;
+
+    void picker(message, { modal: true }, ...items).then((picked) => {
+      activeDialogs.delete(key);
+      if (tracker.cancelled) return;
+      const choice = picked ? req.buttons.indexOf(picked.title) + 1 : 0;
+      void manager.sendDialogChoice(sockPath, req.id, choice);
+    });
+  });
+
+  manager.on('dialogClose', (sockPath: string, id: number) => {
+    const tracker = activeDialogs.get(`${sockPath}:${id}`);
+    if (tracker) {
+      tracker.cancelled = true;
+      activeDialogs.delete(`${sockPath}:${id}`);
+    }
+  });
+
+  manager.on('dialogReset', (sockPath: string) => {
+    for (const [key, tracker] of activeDialogs.entries()) {
+      if (key.startsWith(`${sockPath}:`)) {
+        tracker.cancelled = true;
+        activeDialogs.delete(key);
+      }
     }
   });
 
@@ -202,8 +251,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     vscode.commands.registerCommand('relapse.executeFile', async (item?: ScriptFileItem) => {
       if (!item) return;
-      const source = await fs.readFile(item.filePath, 'utf8');
-      await executeSource(item.fileName, source);
+      try {
+        const source = await fs.readFile(item.filePath, 'utf8');
+        await executeSource(item.fileName, source);
+      } catch (err) {
+        void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
+      }
+    }),
+
+    vscode.commands.registerCommand('relapse.copyJoinUri', async (item?: SessionTreeItem) => {
+      const place = item?.session.place;
+      if (!place) {
+        void vscode.window.showInformationMessage('This session is not currently in a game.');
+        return;
+      }
+      const uri = buildJoinUri(place.placeId, place.jobId);
+      if (uri) {
+        await vscode.env.clipboard.writeText(uri);
+        vscode.window.setStatusBarMessage(`$(clippy) Copied ${uri}`, 3000);
+      }
     }),
 
     vscode.commands.registerCommand('relapse.showOutput', () => {
@@ -492,6 +558,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       } catch (err) {
         void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
       }
+    }),
+
+    vscode.commands.registerCommand('relapse.openGlobalConfig', async () => {
+      try {
+        const configPath = configuration.globalPath();
+        try {
+          await fs.access(configPath);
+        } catch {
+          const global = await configuration.readGlobal();
+          await configuration.writeGlobal(global);
+        }
+        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(configPath));
+        await vscode.window.showTextDocument(doc);
+      } catch (err) {
+        void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
+      }
+    }),
+
+    vscode.commands.registerCommand('relapse.openProfileConfig', async (item?: ProfileTreeItem) => {
+      if (!item) return;
+      try {
+        const configPath = configuration.profilePath(item.profile.name);
+        try {
+          await fs.access(configPath);
+        } catch {
+          const existing = await configuration.readProfile(item.profile.name);
+          await configuration.writeProfile(item.profile.name, existing);
+        }
+        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(configPath));
+        await vscode.window.showTextDocument(doc);
+      } catch (err) {
+        void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
+      }
     })
   );
 
@@ -512,7 +611,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             : null,
       });
       if (!fileName) return;
-      await fs.mkdir(folder, { recursive: true });
+      try {
+        await fs.mkdir(folder, { recursive: true });
+      } catch (err) {
+        void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
+        return;
+      }
       const target = path.join(folder, fileName.trim());
       try {
         await fs.writeFile(target, '', { flag: 'wx', encoding: 'utf8' });

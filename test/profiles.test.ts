@@ -211,4 +211,43 @@ describe('ProfileStore & AccountStore', () => {
     await assert.rejects(store.deleteProfile('alias', async () => assert.fail('Must preserve overlapping data')), /overlap/);
   });
 
+  it('lists valid profiles when another profile config is malformed', async () => {
+    const dir = await makeDir();
+    const config = options(dir);
+    const store = new ProfileStore(config);
+    await store.createProfile('good');
+    const badDir = path.dirname(configuration.profilePath('broken', config));
+    await fs.mkdir(badDir, { recursive: true });
+    await fs.writeFile(path.join(badDir, 'config.json'), '{not-valid-json', 'utf8');
+    assert.deepEqual(await store.listProfiles(), ['good']);
+  });
+
+  it('rejects unrecognized state/.format versions during cookie import', async () => {
+    const dir = await makeDir();
+    const config = options(dir);
+    const store = new ProfileStore(config);
+    const accounts = new AccountStore(config);
+    await store.createProfile('main');
+    const stateDir = path.join(await store.profilePath('main'), 'state');
+    await fs.mkdir(stateDir, { recursive: true });
+    await fs.writeFile(path.join(stateDir, '.format'), '2\n', 'utf8');
+    await assert.rejects(accounts.writeCookie('main', 'cookie_val'), /Unrecognized profile layout/);
+  });
+
+  it('deletes configured profiles without creating a missing dataDir', async () => {
+    const dir = await makeDir();
+    const config = options(dir);
+    const store = new ProfileStore(config);
+    const missingData = path.join(dir, 'never-launched');
+    await configuration.writeProfile('ghost', { dataDir: missingData }, config);
+    const trashed: string[] = [];
+    await store.deleteProfile('ghost', async target => {
+      trashed.push(target);
+      await fs.rm(target, { recursive: true, force: true });
+    });
+    assert.equal(trashed.length, 1);
+    assert.equal(trashed[0], path.dirname(configuration.profilePath('ghost', config)));
+    await assert.rejects(fs.lstat(missingData));
+  });
+
 });

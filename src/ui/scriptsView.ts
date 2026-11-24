@@ -67,7 +67,19 @@ export class ScriptsTreeProvider implements vscode.TreeDataProvider<ScriptNode> 
     if (!element) {
       const scriptsDir = resolveUserPath(this.getScriptsDir());
       const profiles = this.getProfiles();
-      const configs = await Promise.all((profiles.length ? profiles : [undefined]).map(profile => configuration.resolve(profile)));
+      const defaultAutoexec = path.join(configuration.configDirectory(), 'autoexec');
+      const configs = await Promise.all(
+        (profiles.length ? profiles : [undefined]).map(async (profile) => {
+          try {
+            return await configuration.resolve(profile);
+          } catch {
+            return {
+              profile: profile ?? 'Default',
+              autoexec: defaultAutoexec,
+            };
+          }
+        })
+      );
       const autoexec = new Map<string, string[]>();
       for (const config of configs) {
         const names = autoexec.get(config.autoexec) ?? [];

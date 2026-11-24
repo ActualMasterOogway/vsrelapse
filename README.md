@@ -35,16 +35,19 @@ npx @vscode/vsce package --allow-missing-repository
 ### Sessions and execution
 - Auto-discovers `/tmp/relapse.sock` (`No Profile`) and `/tmp/relapse-*.sock`.
 - Native sidebar checkboxes let you target one or multiple running sessions at once.
+- Tracks each session's current place and job ID for tooltips and `Relapse: Copy Join URI`.
 - Status bar item shows current targets and opens a quick session picker when clicked.
 - Output redirection (`vsrelapse.session.v2`) forwards `print`, `warn`, `info`, and uncaught errors with stack traces to `Output → Relapse`.
 
-### Integrated `rconsole`
+### Integrated `rconsole` and dialogs
 - Implements `vsrelapse.console.v1` inside a native VS Code terminal (`Pseudoterminal`).
 - Buffers early `rconsoleprint`, `rconsoleinfo`, `rconsolewarn`, and `rconsoleerr` calls until the terminal finishes opening so first-run messages are never dropped.
-- Supports `rconsolename`, `rconsoleclear`, `rconsoleshow`, `rconsolehide`, and `rconsoleinput(prompt?)`.
+- Supports `rconsolename`, `rconsolesettitle`, `rconsoleclear`, `rconsolecreate`, `rconsoledestroy`, `rconsolehidden`, `rconsoleshow`, `rconsolehide`, and `rconsoleinput(prompt?)`. Closing the terminal unblocks pending `rconsoleinput` calls.
+- Implements `vsrelapse.dialogs.v1` so in-game `messagebox(...)` and `MessageBox.new(...)` calls open native VS Code modal dialogs.
 
 ### Profiles and accounts
 - Uses `relapsesdk` for profile discovery, creation, and configuration resolution, including XDG directories and custom `dataDir` paths.
+- Includes `Relapse: Open Global Config` and `Relapse: Open Profile Config` to edit `config.json` files directly in VS Code.
 - Renaming updates the profile configuration and default selection while retaining its data directory. Moving a profile to Trash includes its configuration and unshared data.
 - Reads `.lock` with a non-blocking `flock` check to show live running status and prevent modifying active profiles.
 - Imports `.ROBLOSECURITY` cookies (raw token or full `Cookie:` header) into `state/app/data/sober/cookies`, fetches the Roblox username and headshot, and caches metadata in `account.json`.

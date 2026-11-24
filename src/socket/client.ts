@@ -8,6 +8,7 @@ export class SocketClient extends EventEmitter {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private readonly shutdown = new AbortController();
   private state: SocketClientState = 'disconnected';
+  private lastError?: string;
 
   constructor(private readonly socketPath: string, private readonly reconnectMs = 1000) {
     super();
@@ -71,19 +72,26 @@ export class SocketClient extends EventEmitter {
         return;
       }
       this.client = client;
+      this.lastError = undefined;
       client.mainChannel.on('status', () => this.setState(client.mainChannel.ready ? 'ready' : 'waiting'));
       client.mainChannel.on('log', ({ level, text }) => this.emit('log', level, text));
       client.mainChannel.on('close', ({ error }) => {
         this.client = null;
         if (this.shutdown.signal.aborted) return;
         this.setState('disconnected');
-        if (error) this.emit('error', error.message);
+        if (error) this.reportError(error.message);
       });
       this.setState(client.mainChannel.ready ? 'ready' : 'waiting');
     } catch (error) {
       if (this.shutdown.signal.aborted) return;
       this.setState('disconnected');
-      this.emit('error', error instanceof Error ? error.message : String(error));
+      this.reportError(error instanceof Error ? error.message : String(error));
     }
+  }
+
+  private reportError(detail: string): void {
+    if (this.lastError === detail) return;
+    this.lastError = detail;
+    this.emit('error', detail);
   }
 }

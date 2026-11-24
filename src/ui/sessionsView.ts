@@ -5,7 +5,7 @@ export class SessionTreeItem extends vscode.TreeItem {
   constructor(public readonly session: SessionInfo) {
     super(session.name, vscode.TreeItemCollapsibleState.None);
     this.id = session.path;
-    this.contextValue = 'session';
+    this.contextValue = session.place ? 'sessionInGame' : 'session';
 
     const stateLabel =
       session.state === 'ready'
@@ -20,8 +20,26 @@ export class SessionTreeItem extends vscode.TreeItem {
             ? 'Connecting…'
             : 'Disconnected';
 
-    this.description = session.session > 0 ? `${stateLabel} (#${session.session})` : stateLabel;
-    this.tooltip = `${session.name}\nSocket: ${session.path}\nState: ${stateLabel}`;
+    const placeLabel = session.place
+      ? (session.place.name ?? `Place ${session.place.placeId}`)
+      : undefined;
+    const descParts = [session.session > 0 ? `${stateLabel} (#${session.session})` : stateLabel];
+    if (placeLabel) descParts.push(placeLabel);
+    this.description = descParts.join(' • ');
+
+    const tipLines = [
+      session.name,
+      `Socket: ${session.path}`,
+      `State: ${stateLabel}`,
+    ];
+    if (session.pid > 0) tipLines.push(`PID: ${session.pid}`);
+    if (session.place) {
+      tipLines.push(
+        `Place: ${session.place.name ? `${session.place.name} (${session.place.placeId})` : session.place.placeId}`,
+        `Job ID: ${session.place.jobId}`
+      );
+    }
+    this.tooltip = tipLines.join('\n');
     this.iconPath = new vscode.ThemeIcon(
       session.state === 'ready'
         ? 'plug'

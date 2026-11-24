@@ -91,7 +91,9 @@ class RelapseConsolePty implements vscode.Pseudoterminal {
 
   handleInput(data: string): void {
     if (!this.isWaitingInput()) return;
-    for (const ch of data) {
+    // Strip ANSI CSI / SS3 escape sequences (e.g. arrow keys) so they aren't appended into lineBuffer
+    const cleaned = data.replace(/\x1b\[[0-9;?]*[A-Za-z~]|\x1bO[A-Za-z]/g, '');
+    for (const ch of cleaned) {
       if (ch === '\r' || ch === '\n') {
         const line = this.getInputBuffer();
         this.setInputBuffer('');
@@ -134,6 +136,15 @@ export class ConsoleTerminalManager {
 
     manager.on('consoleClear', (sockPath: string) => {
       this.states.get(sockPath)?.pty?.clear();
+    });
+
+    manager.on('consoleDestroy', (sockPath: string) => {
+      const st = this.states.get(sockPath);
+      if (!st) return;
+      st.pendingInputId = null;
+      st.lineBuffer = '';
+      st.terminal?.dispose();
+      this.states.delete(sockPath);
     });
 
     manager.on('consoleEntry', (sockPath: string, level: string, text: string) => {
@@ -188,10 +199,14 @@ export class ConsoleTerminalManager {
           }
         },
         () => {
+          const hadPending = st.pendingInputId !== null;
           st.terminal = undefined;
           st.pty = undefined;
           st.pendingInputId = null;
           st.lineBuffer = '';
+          if (hadPending) {
+            void this.manager.sendConsoleClosed(sockPath);
+          }
         },
         () => st.lineBuffer,
         (next) => {

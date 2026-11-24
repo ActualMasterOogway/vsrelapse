@@ -3,7 +3,8 @@ import { listClients } from 'relapsesdk';
 import * as path from 'node:path';
 import { SocketClient, SocketClientState } from './client';
 import { OutputState, SessionBridge } from './sessionBridge';
-import { ConsoleBridge } from './consoleBridge';
+import { ConsoleBridge, ConsolePlace } from './consoleBridge';
+import { DialogBridge, DialogRequest } from './dialogBridge';
 
 export interface SessionInfo {
   path: string;
@@ -13,12 +14,14 @@ export interface SessionInfo {
   session: number;
   pid: number;
   targeted: boolean;
+  place: ConsolePlace | null;
 }
 
 export interface SessionManagerOptions {
   socketDir?: string;
   sessionScript: string;
   consoleScript: string;
+  dialogScript?: string;
   redirectOutput?: boolean;
   autoTargetFirst?: boolean;
   pollMs?: number;
@@ -30,6 +33,7 @@ interface ManagedSession {
   client: SocketClient;
   bridge: SessionBridge;
   console: ConsoleBridge;
+  dialogs?: DialogBridge;
 }
 
 export function profileNameFromSocketPath(socketPath: string): string {
@@ -44,6 +48,7 @@ export class SessionManager extends EventEmitter {
   private readonly socketDir: string;
   private readonly sessionScript: string;
   private readonly consoleScript: string;
+  private readonly dialogScript?: string;
   private readonly pollMs: number;
   private outputEnabled: boolean;
   private autoTargetFirst: boolean;
@@ -59,6 +64,7 @@ export class SessionManager extends EventEmitter {
     this.socketDir = options.socketDir ?? '/tmp';
     this.sessionScript = options.sessionScript;
     this.consoleScript = options.consoleScript;
+    this.dialogScript = options.dialogScript;
     this.outputEnabled = options.redirectOutput ?? true;
     this.autoTargetFirst = options.autoTargetFirst ?? true;
     this.pollMs = options.pollMs ?? 1000;
@@ -80,6 +86,7 @@ export class SessionManager extends EventEmitter {
       this.pollTimer = null;
     }
     for (const entry of this.sessions.values()) {
+      entry.dialogs?.dispose();
       entry.console.dispose();
       entry.bridge.dispose();
       entry.client.dispose();
@@ -115,6 +122,7 @@ export class SessionManager extends EventEmitter {
       // Remove closed/gone sockets
       for (const [sockPath, entry] of this.sessions.entries()) {
         if (!discoveredSet.has(sockPath)) {
+          entry.dialogs?.dispose();
           entry.console.dispose();
           entry.bridge.dispose();
           entry.client.dispose();
@@ -168,6 +176,7 @@ export class SessionManager extends EventEmitter {
         session: s.client.getSession(),
         pid: s.client.getPeerPid(),
         targeted: this.targeted.has(s.path),
+        place: s.console.getPlace(),
       }));
   }
 
@@ -204,17 +213,27 @@ export class SessionManager extends EventEmitter {
     return this.sessions.get(socketPath)?.console.sendInput(id, text) ?? false;
   }
 
+  async sendConsoleClosed(socketPath: string): Promise<boolean> {
+    return this.sessions.get(socketPath)?.console.sendClosed() ?? false;
+  }
+
+  async sendDialogChoice(socketPath: string, id: number, choice: number): Promise<boolean> {
+    return this.sessions.get(socketPath)?.dialogs?.sendChoice(id, choice) ?? false;
+  }
+
   private addSession(sockPath: string): void {
     const name = profileNameFromSocketPath(sockPath);
     const client = new SocketClient(sockPath);
     const bridge = new SessionBridge(client, this.sessionScript);
     const consoleBridge = new ConsoleBridge(client, this.consoleScript);
+    const dialogBridge = this.dialogScript ? new DialogBridge(client, this.dialogScript) : undefined;
 
     bridge.setOutputEnabled(this.outputEnabled);
 
     client.on('stateChanged', () => {
       bridge.sync();
       consoleBridge.sync();
+      dialogBridge?.sync();
       if (this.autoTargetFirst && this.targeted.size === 0 && client.isReady()) {
         this.targeted.add(sockPath);
       }
@@ -240,6 +259,8 @@ export class SessionManager extends EventEmitter {
     consoleBridge.on('show', (visible: boolean) => this.emit('consoleShow', sockPath, visible));
     consoleBridge.on('title', (title: string) => this.emit('consoleTitle', sockPath, title));
     consoleBridge.on('clear', () => this.emit('consoleClear', sockPath));
+    consoleBridge.on('destroy', () => this.emit('consoleDestroy', sockPath));
+    consoleBridge.on('place', () => this.emit('sessionsChanged'));
     consoleBridge.on('entry', (level: string, text: string) =>
       this.emit('consoleEntry', sockPath, level, text)
     );
@@ -250,12 +271,22 @@ export class SessionManager extends EventEmitter {
       this.emit('entry', sockPath, 'error', `[console] ${detail}`)
     );
 
+    if (dialogBridge) {
+      dialogBridge.on('open', (req: DialogRequest) => this.emit('dialogOpen', sockPath, req));
+      dialogBridge.on('close', (id: number) => this.emit('dialogClose', sockPath, id));
+      dialogBridge.on('reset', () => this.emit('dialogReset', sockPath));
+      dialogBridge.on('error', (detail: string) =>
+        this.emit('entry', sockPath, 'error', `[dialogs] ${detail}`)
+      );
+    }
+
     this.sessions.set(sockPath, {
       path: sockPath,
       name,
       client,
       bridge,
       console: consoleBridge,
+      dialogs: dialogBridge,
     });
 
     client.start();
