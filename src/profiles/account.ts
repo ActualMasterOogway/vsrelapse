@@ -180,6 +180,27 @@ export class AccountStore {
     }
   }
 
+  async ensureStateInitialized(name: string): Promise<boolean> {
+    const { dataDir, state } = await profiles.paths(name, this.options);
+    const stateExists = await fs.lstat(state).then(() => true, error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    });
+    if (!stateExists) return false;
+    const markerExists = await fs.lstat(path.join(state, '.format')).then(() => true, error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    });
+    if (markerExists) {
+      await this.initializeState(state);
+      return false;
+    }
+    await withProfileLock(dataDir, async () => {
+      await this.initializeState(state);
+    });
+    return true;
+  }
+
   private async initializeState(state: string): Promise<void> {
     const marker = await fs.readFile(path.join(state, '.format'), 'utf8').catch(error => {
       if (error.code === 'ENOENT') return undefined;

@@ -53,6 +53,10 @@ export async function run(): Promise<void> {
     'relapse.openGlobalConfig',
     'relapse.openProfileConfig',
     'relapse.copyJoinUri',
+    'relapse.joinSessionServer',
+    'relapse.addAccountFromCookie',
+    'relapse.launchMultipleProfiles',
+    'relapse.migrateLegacyData',
   ];
   for (const cmd of expectedCommands) {
     assert.ok(commands.includes(cmd), `Command ${cmd} should be registered`);

@@ -6,18 +6,30 @@ import { configuration } from 'relapsesdk';
 
 export type ScriptNode = ScriptFolderItem | ScriptFileItem;
 
+export type ScriptFolderKind = 'scripts' | 'autoexec' | 'workspace';
+
 export class ScriptFolderItem extends vscode.TreeItem {
   constructor(
     public readonly folderName: string,
     public readonly folderPath: string,
-    public readonly isAutoexec: boolean
+    public readonly kind: ScriptFolderKind,
+    collapsibleState: vscode.TreeItemCollapsibleState = kind === 'workspace'
+      ? vscode.TreeItemCollapsibleState.Collapsed
+      : vscode.TreeItemCollapsibleState.Expanded
   ) {
-    super(folderName, vscode.TreeItemCollapsibleState.Expanded);
-    this.id = `folder:${folderPath}`;
-    this.contextValue = 'scriptFolder';
-    this.description = isAutoexec ? 'autoexec' : '';
+    super(folderName, collapsibleState);
+    this.id = `folder:${kind}:${folderPath}`;
+    this.contextValue = kind === 'workspace' ? 'workspaceFolder' : 'scriptFolder';
+    this.description =
+      kind === 'autoexec'
+        ? 'autoexec'
+        : kind === 'workspace' && folderName === 'Workspace'
+          ? 'workspace'
+          : '';
     this.tooltip = folderPath;
-    this.iconPath = new vscode.ThemeIcon(isAutoexec ? 'zap' : 'folder');
+    this.iconPath = new vscode.ThemeIcon(
+      kind === 'autoexec' ? 'zap' : kind === 'workspace' ? 'folder-library' : 'folder'
+    );
   }
 }
 
@@ -68,6 +80,7 @@ export class ScriptsTreeProvider implements vscode.TreeDataProvider<ScriptNode> 
       const scriptsDir = resolveUserPath(this.getScriptsDir());
       const profiles = this.getProfiles();
       const defaultAutoexec = path.join(configuration.configDirectory(), 'autoexec');
+      const defaultWorkspace = path.join(configuration.dataDirectory(), 'workspace');
       const configs = await Promise.all(
         (profiles.length ? profiles : [undefined]).map(async (profile) => {
           try {
@@ -76,21 +89,42 @@ export class ScriptsTreeProvider implements vscode.TreeDataProvider<ScriptNode> 
             return {
               profile: profile ?? 'Default',
               autoexec: defaultAutoexec,
+              workspace: defaultWorkspace,
             };
           }
         })
       );
       const autoexec = new Map<string, string[]>();
+      const workspaces = new Map<string, string[]>();
       for (const config of configs) {
-        const names = autoexec.get(config.autoexec) ?? [];
-        names.push(config.profile);
-        autoexec.set(config.autoexec, names);
+        const aeNames = autoexec.get(config.autoexec) ?? [];
+        aeNames.push(config.profile);
+        autoexec.set(config.autoexec, aeNames);
+
+        const wsNames = workspaces.get(config.workspace) ?? [];
+        wsNames.push(config.profile);
+        workspaces.set(config.workspace, wsNames);
       }
       return [
-        new ScriptFolderItem('Scripts', scriptsDir, false),
-        ...Array.from(autoexec, ([directory, names]) => new ScriptFolderItem(
-          autoexec.size === 1 ? 'Autoexec' : `Autoexec (${names.join(', ')})`, directory, true
-        )),
+        new ScriptFolderItem('Scripts', scriptsDir, 'scripts'),
+        ...Array.from(
+          autoexec,
+          ([directory, names]) =>
+            new ScriptFolderItem(
+              autoexec.size === 1 ? 'Autoexec' : `Autoexec (${names.join(', ')})`,
+              directory,
+              'autoexec'
+            )
+        ),
+        ...Array.from(
+          workspaces,
+          ([directory, names]) =>
+            new ScriptFolderItem(
+              workspaces.size === 1 ? 'Workspace' : `Workspace (${names.join(', ')})`,
+              directory,
+              'workspace'
+            )
+        ),
       ];
     }
 
@@ -101,20 +135,24 @@ export class ScriptsTreeProvider implements vscode.TreeDataProvider<ScriptNode> 
       } catch {
         return [];
       }
-      const files: ScriptFileItem[] = [];
+      const nodes: ScriptNode[] = [];
       for (const name of names.sort()) {
         if (name.startsWith('.')) continue;
         const full = path.join(element.folderPath, name);
         try {
           const st = await fs.stat(full);
-          if (st.isFile()) {
-            files.push(new ScriptFileItem(name, full));
+          if (st.isDirectory() && element.kind === 'workspace') {
+            nodes.push(
+              new ScriptFolderItem(name, full, 'workspace', vscode.TreeItemCollapsibleState.Collapsed)
+            );
+          } else if (st.isFile()) {
+            nodes.push(new ScriptFileItem(name, full));
           }
         } catch {
           // Ignore
         }
       }
-      return files;
+      return nodes;
     }
 
     return [];

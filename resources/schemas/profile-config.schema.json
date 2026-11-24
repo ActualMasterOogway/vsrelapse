@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Relapse Profile Configuration",
+  "type": "object",
+  "properties": {
+    "dataDir": {
+      "type": "string",
+      "pattern": "^/",
+      "description": "Absolute path to this profile's data directory."
+    },
+    "override": {
+      "type": "object",
+      "description": "Per-profile overrides for global Relapse settings.",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Absolute path override for the workspace directory."
+        },
+        "autoexec": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Absolute path override for the autoexec directory."
+        },
+        "autolaunch": {
+          "type": ["array", "null"],
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "Per-profile autolaunch command override."
+        },
+        "raknet": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Override RakNet enabled state for this profile."
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -196,6 +196,30 @@
         "category": "Relapse",
         "title": "Copy Join URI",
         "icon": "$(clippy)"
+      },
+      {
+        "command": "relapse.joinSessionServer",
+        "category": "Relapse",
+        "title": "Join Server with Profile...",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "relapse.addAccountFromCookie",
+        "category": "Relapse",
+        "title": "Add Account from Cookie",
+        "icon": "$(person-add)"
+      },
+      {
+        "command": "relapse.launchMultipleProfiles",
+        "category": "Relapse",
+        "title": "Launch Profiles...",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "relapse.migrateLegacyData",
+        "category": "Relapse",
+        "title": "Migrate Legacy Data",
+        "icon": "$(archive)"
       }
     ],
     "keybindings": [
@@ -251,13 +275,28 @@
           "when": "view == relapse.profiles"
         },
         {
-          "command": "relapse.openGlobalConfig",
+          "command": "relapse.refreshProfiles",
           "group": "navigation",
           "when": "view == relapse.profiles"
         },
         {
-          "command": "relapse.refreshProfiles",
-          "group": "navigation",
+          "command": "relapse.addAccountFromCookie",
+          "group": "1_actions",
+          "when": "view == relapse.profiles"
+        },
+        {
+          "command": "relapse.launchMultipleProfiles",
+          "group": "1_actions",
+          "when": "view == relapse.profiles"
+        },
+        {
+          "command": "relapse.openGlobalConfig",
+          "group": "2_config",
+          "when": "view == relapse.profiles"
+        },
+        {
+          "command": "relapse.migrateLegacyData",
+          "group": "2_config",
           "when": "view == relapse.profiles"
         },
         {
@@ -271,6 +310,11 @@
           "command": "relapse.openConsole",
           "group": "inline",
           "when": "view == relapse.sessions && viewItem =~ /^session/"
+        },
+        {
+          "command": "relapse.joinSessionServer",
+          "group": "1_session",
+          "when": "view == relapse.sessions && viewItem == sessionInGame"
         },
         {
           "command": "relapse.copyJoinUri",
@@ -334,6 +378,20 @@
         }
       ]
     },
+    "jsonValidation": [
+      {
+        "fileMatch": [
+          "**/relapse/config.json"
+        ],
+        "url": "./resources/schemas/global-config.schema.json"
+      },
+      {
+        "fileMatch": [
+          "**/relapse/profiles/*/config.json"
+        ],
+        "url": "./resources/schemas/profile-config.schema.json"
+      }
+    ],
     "configuration": {
       "title": "Relapse",
       "properties": {

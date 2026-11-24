@@ -3,6 +3,11 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { configuration } from 'relapsesdk';
 import { AccountStore } from './profiles/account';
+import {
+  findDefaultLauncher,
+  migrateLegacyProfiles,
+  migrateLegacyScriptsDir,
+} from './profiles/migrate';
 import { buildJoinUri, isValidProfileName, ProfileStore } from './profiles/store';
 import { profileNameFromSocketPath, SessionManager } from './socket/sessionManager';
 import type { DialogRequest } from './socket/dialogBridge';
@@ -272,6 +277,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
 
+    vscode.commands.registerCommand('relapse.joinSessionServer', async (item?: SessionTreeItem) => {
+      const place = item?.session.place;
+      if (!place) {
+        void vscode.window.showInformationMessage('This session is not currently in a game.');
+        return;
+      }
+      const allProfiles = await profileStore.listProfiles();
+      const stopped: Array<{ label: string; description?: string }> = [];
+      for (const name of allProfiles) {
+        if (await profileStore.isProfileRunning(name)) continue;
+        const cookie = await accountStore.readCookie(name).catch(() => null);
+        const acc = await accountStore.loadAccount(name, cookie).catch(() => null);
+        stopped.push({
+          label: name,
+          description: acc ? `@${acc.username} (${acc.displayName})` : undefined,
+        });
+      }
+      if (stopped.length === 0) {
+        void vscode.window.showInformationMessage('No stopped profiles available to join.');
+        return;
+      }
+      const picked = await vscode.window.showQuickPick(stopped, {
+        placeHolder: `Launch a profile into ${place.name ?? `Place ${place.placeId}`}`,
+      });
+      if (!picked) return;
+      await launchWithFeedback(picked.label, place.placeId, place.jobId);
+    }),
+
     vscode.commands.registerCommand('relapse.showOutput', () => {
       outputChannel.show(true);
     }),
@@ -352,6 +385,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const resolveLauncherPath = async (): Promise<string | null> => {
     let launcher = getConfig().get<string>('launcherPath', '').trim();
     if (!launcher) {
+      const detected = await findDefaultLauncher();
+      if (detected) {
+        await getConfig().update('launcherPath', detected, vscode.ConfigurationTarget.Global);
+        vscode.window.setStatusBarMessage(`$(check) Detected Relapse launcher: ${detected}`, 4000);
+        return detected;
+      }
       const picked = await vscode.window.showOpenDialog({
         canSelectFiles: true,
         canSelectFolders: false,
@@ -588,6 +627,151 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
         const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(configPath));
         await vscode.window.showTextDocument(doc);
+      } catch (err) {
+        void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
+      }
+    }),
+
+    vscode.commands.registerCommand('relapse.addAccountFromCookie', async () => {
+      const raw = await vscode.window.showInputBox({
+        prompt: 'Paste .ROBLOSECURITY cookie to create a profile',
+        password: true,
+        ignoreFocusOut: true,
+      });
+      if (!raw) return;
+
+      const account = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Verifying .ROBLOSECURITY cookie…',
+        },
+        async () => {
+          try {
+            return await accountStore.lookupAccount(raw);
+          } catch (err) {
+            void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
+            return null;
+          }
+        }
+      );
+      if (!account) return;
+
+      const suggested = account.username.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64) || 'account';
+      const existingProfiles = new Set(await profileStore.listProfiles());
+      const name = await vscode.window.showInputBox({
+        prompt: `Profile name for @${account.username} (${account.displayName})`,
+        value: suggested,
+        validateInput: (val) => {
+          const trimmed = val.trim();
+          if (!isValidProfileName(trimmed)) {
+            return 'Use 1–64 letters, digits, dots, underscores or hyphens (excluding . and ..).';
+          }
+          if (existingProfiles.has(trimmed)) {
+            return 'A profile with this name already exists.';
+          }
+          return null;
+        },
+      });
+      if (!name) return;
+
+      try {
+        await accountStore.importAccount(name.trim(), raw, account, true);
+        profilesProvider.refresh();
+        void vscode.window.showInformationMessage(
+          `Created profile "${name.trim()}" for @${account.username}.`
+        );
+      } catch (err) {
+        void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
+      }
+    }),
+
+    vscode.commands.registerCommand('relapse.launchMultipleProfiles', async () => {
+      const allProfiles = await profileStore.listProfiles();
+      const stopped: Array<{ label: string; description?: string }> = [];
+      for (const name of allProfiles) {
+        if (await profileStore.isProfileRunning(name)) continue;
+        const cookie = await accountStore.readCookie(name).catch(() => null);
+        const acc = await accountStore.loadAccount(name, cookie).catch(() => null);
+        stopped.push({
+          label: name,
+          description: acc ? `@${acc.username} (${acc.displayName})` : undefined,
+        });
+      }
+      if (stopped.length === 0) {
+        void vscode.window.showInformationMessage('No stopped profiles available to launch.');
+        return;
+      }
+
+      const picks = await vscode.window.showQuickPick(stopped, {
+        canPickMany: true,
+        placeHolder: 'Select profile(s) to launch',
+      });
+      if (!picks || picks.length === 0) return;
+
+      const activePlace = manager.listSessions().find((s) => s.place)?.place;
+      const placeId = await vscode.window.showInputBox({
+        prompt: 'Optional Place ID — leave empty to open launcher home',
+        placeHolder: 'e.g. 1818',
+        value: activePlace?.placeId ?? '',
+      });
+      if (placeId === undefined) return;
+
+      let jobId = '';
+      if (placeId.trim()) {
+        const enteredJob = await vscode.window.showInputBox({
+          prompt: 'Optional Job ID (UUID) — leave empty to join any server',
+          placeHolder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+          value: activePlace && activePlace.placeId === placeId.trim() ? activePlace.jobId : '',
+        });
+        if (enteredJob === undefined) return;
+        jobId = enteredJob;
+      }
+
+      try {
+        buildJoinUri(placeId, jobId);
+      } catch (err) {
+        void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
+        return;
+      }
+
+      for (const pick of picks) {
+        await launchWithFeedback(pick.label, placeId, jobId);
+      }
+    }),
+
+    vscode.commands.registerCommand('relapse.migrateLegacyData', async () => {
+      try {
+        const report = await migrateLegacyProfiles();
+        let launcherMsg = '';
+        if (!getConfig().get<string>('launcherPath', '').trim()) {
+          const detected = await findDefaultLauncher();
+          if (detected) {
+            await getConfig().update('launcherPath', detected, vscode.ConfigurationTarget.Global);
+            launcherMsg = ` Launcher path set to ${detected}.`;
+          }
+        }
+        const scriptsTarget = resolveUserPath(
+          getConfig().get<string>('scriptsDir', '~/.local/share/relapse/scripts')
+        );
+        const scriptsRes = await migrateLegacyScriptsDir(scriptsTarget);
+        profilesProvider.refresh();
+        scriptsProvider.refresh();
+
+        const parts: string[] = [];
+        if (report.migratedConfigs.length > 0) {
+          parts.push(`created config.json for ${report.migratedConfigs.join(', ')}`);
+        }
+        if (report.upgradedStates.length > 0) {
+          parts.push(`initialized state/.format for ${report.upgradedStates.join(', ')}`);
+        }
+        if (scriptsRes.moved.length > 0) {
+          parts.push(`moved ${scriptsRes.moved.length} script(s) from ~/relapse-scripts-tmpdir`);
+        }
+        const summary =
+          parts.length > 0
+            ? `Relapse migration complete: ${parts.join('; ')}.${launcherMsg}`
+            : `All Relapse profiles and files are already up to date.${launcherMsg}`;
+        void vscode.window.showInformationMessage(summary);
       } catch (err) {
         void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
       }

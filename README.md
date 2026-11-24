@@ -47,14 +47,16 @@ npx @vscode/vsce package --allow-missing-repository
 
 ### Profiles and accounts
 - Uses `relapsesdk` for profile discovery, creation, and configuration resolution, including XDG directories and custom `dataDir` paths.
-- Includes `Relapse: Open Global Config` and `Relapse: Open Profile Config` to edit `config.json` files directly in VS Code.
+- Includes `Relapse: Add Account from Cookie` to verify a cookie, pre-fill the profile name, and import in one step, plus `Relapse: Launch Profiles...` and `Relapse: Join Server with Profile...`.
+- Includes `Relapse: Open Global Config` and `Relapse: Open Profile Config` with JSON schema autocomplete and validation for `config.json`.
+- `Relapse: Migrate Legacy Data` converts data-only profiles to `config.json`, adds missing `state/.format` markers, imports the launcher path from `relapsegtk`'s `settings.ini`, and migrates legacy scripts.
 - Renaming updates the profile configuration and default selection while retaining its data directory. Moving a profile to Trash includes its configuration and unshared data.
 - Reads `.lock` with a non-blocking `flock` check to show live running status and prevent modifying active profiles.
 - Imports `.ROBLOSECURITY` cookies (raw token or full `Cookie:` header) into `state/app/data/sober/cookies`, fetches the Roblox username and headshot, and caches metadata in `account.json`.
 - Launches profiles detached (`--profile <name> --no-launch-ui`), with an optional Place ID and Job ID, while animating the sidebar row and status bar until the socket connects.
 
 ### Scripts and autoexec
-- Lists files from your configured scripts folder (`~/.local/share/relapse/scripts` by default) and the autoexec directories resolved for targeted profiles. With no named targets, uses the configured default profile.
+- Lists files from your configured scripts folder (`~/.local/share/relapse/scripts` by default), the autoexec directories resolved for targeted profiles, and the resolved `workspace` directory. With no named targets, uses the configured default profile.
 - Click any file to open it, or run it directly from the sidebar.
 
 ## Shortcuts and commands
