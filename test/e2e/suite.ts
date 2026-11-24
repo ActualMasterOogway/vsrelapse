@@ -75,7 +75,7 @@ export async function run(): Promise<void> {
           channel = String(msg.channel);
           conn.write(encodeFrame({ ok: true, version: 1, max_message_bytes: 1048576 }));
           if (channel === '@main') {
-            conn.write(encodeFrame({ type: 'hello', ready: true, session: 99 }));
+            conn.write(encodeFrame({ type: 'hello', pid: 1234, profile: 'default', ready: true, session: 99 }));
           }
         } else if (channel === '@main' && msg.op === 'execute') {
           executedNames.push(String(msg.name));

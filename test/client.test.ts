@@ -53,7 +53,7 @@ describe('SocketClient', () => {
           if (!opened) {
             opened = true;
             conn.write(encodeFrame({ ok: true, version: 1, max_message_bytes: 1048576 }));
-            conn.write(encodeFrame({ type: 'hello', ready: false, session: 0 }));
+            conn.write(encodeFrame({ type: 'hello', pid: 1234, profile: 'default', ready: false, session: 0 }));
           } else {
             receivedOps.push(msg);
             const req = msg as { script_id: number };
@@ -72,24 +72,18 @@ describe('SocketClient', () => {
     const client = new SocketClient(sockPath, 50);
     try {
       const states: string[] = [];
-      const execResults: Array<{ id: number; submitted: boolean }> = [];
 
-      await new Promise<void>((resolve) => {
+      await new Promise<void>((resolve, reject) => {
         client.on('stateChanged', (state: string) => {
           states.push(state);
           if (state === 'waiting') {
             assert.equal(client.isReady(), false);
-            assert.deepEqual(client.execute('early.luau', 'print(0)'), { result: 'not_ready' });
+            void assert.rejects(client.execute('early.luau', 'print(0)'), /not ready/);
           } else if (state === 'ready') {
             assert.equal(client.isReady(), true);
             assert.equal(client.getSession(), 42);
-            const res = client.execute('test.luau', 'print(1)');
-            assert.deepEqual(res, { result: 'queued', scriptId: 1 });
+            void client.execute('test.luau', 'print(1)').then(() => resolve(), reject);
           }
-        });
-        client.on('execResult', (id: number, submitted: boolean) => {
-          execResults.push({ id, submitted });
-          resolve();
         });
         client.start();
       });
@@ -97,16 +91,16 @@ describe('SocketClient', () => {
       assert.ok(states.includes('waiting'));
       assert.ok(states.includes('ready'));
       assert.deepEqual(receivedOps, [
-        { op: 'execute', script_id: 1, session: 42, name: 'test.luau', source: 'print(1)' },
+        { op: 'execute', script_id: 2, session: 42, name: 'test.luau', source: 'print(1)' },
       ]);
-      assert.deepEqual(execResults, [{ id: 1, submitted: true }]);
+      assert.equal(client.getPeerPid(), 1234);
     } finally {
       client.dispose();
       server.close();
     }
   });
 
-  it('emits log and error events and rejects non-hello first message', async () => {
+  it('emits log and error events', async () => {
     const sockPath = makeSocketPath();
     let connCount = 0;
 
@@ -120,7 +114,7 @@ describe('SocketClient', () => {
             opened = true;
             conn.write(encodeFrame({ ok: true, version: 1, max_message_bytes: 1048576 }));
             if (connCount === 1) {
-              conn.write(encodeFrame({ type: 'hello', ready: true, session: 7 }));
+              conn.write(encodeFrame({ type: 'hello', pid: 1234, profile: 'default', ready: true, session: 7 }));
               conn.write(encodeFrame({ type: 'log', level: 'print', text: 'hi from executor' }));
               conn.write(encodeFrame({ type: 'error', detail: 'bad request' }));
             } else {
@@ -136,7 +130,7 @@ describe('SocketClient', () => {
     try {
       const logs: Array<{ level: string; text: string }> = [];
       const errors: string[] = [];
-      await new Promise<void>((resolve) => {
+      await new Promise<void>((resolve, reject) => {
         client.on('log', (level: string, text: string) => logs.push({ level, text }));
         client.on('error', (detail: string) => {
           errors.push(detail);
@@ -151,4 +145,53 @@ describe('SocketClient', () => {
       server.close();
     }
   });
+  it('reconnects after a disconnect and rejects an interrupted execution', async () => {
+    const sockPath = makeSocketPath();
+    let connections = 0;
+    const server = net.createServer(conn => {
+      const session = ++connections;
+      const state = { buf: Buffer.alloc(0) };
+      let opened = false;
+      conn.on('data', chunk => {
+        for (const message of decodeFrames(chunk, state)) {
+          if (!opened) {
+            opened = true;
+            conn.write(encodeFrame({ ok: true, version: 1, max_message_bytes: 1048576 }));
+            conn.write(encodeFrame({ type: 'hello', pid: 1234, profile: 'default', ready: true, session }));
+          } else if (session === 1) {
+            conn.destroy();
+          } else {
+            conn.write(encodeFrame({ type: 'exec_result', script_id: (message as { script_id: number }).script_id, phase: 'submitted' }));
+          }
+        }
+      });
+    });
+    await new Promise<void>(resolve => server.listen(sockPath, resolve));
+    const client = new SocketClient(sockPath, 10);
+    client.on('error', () => {});
+    const ready = (session: number) => new Promise<void>(resolve => {
+      const changed = () => {
+        if (client.getSession() === session) {
+          client.off('stateChanged', changed);
+          resolve();
+        }
+      };
+      client.on('stateChanged', changed);
+      changed();
+    });
+    try {
+      const first = ready(1);
+      client.start();
+      await first;
+      const next = ready(2);
+      await assert.rejects(client.execute('interrupted.luau', 'print(1)'), /closed|disconnect/i);
+      await next;
+      await client.execute('retry.luau', 'print(2)');
+      assert.equal(client.getSession(), 2);
+    } finally {
+      client.dispose();
+      server.close();
+    }
+  });
+
 });

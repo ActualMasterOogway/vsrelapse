@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { configuration } from 'relapsesdk';
 
 export type ScriptNode = ScriptFolderItem | ScriptFileItem;
 
@@ -49,7 +50,10 @@ export class ScriptsTreeProvider implements vscode.TreeDataProvider<ScriptNode> 
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  constructor(private readonly getScriptsDir: () => string) {}
+  constructor(
+    private readonly getScriptsDir: () => string,
+    private readonly getProfiles: () => string[] = () => []
+  ) {}
 
   refresh(): void {
     this._onDidChangeTreeData.fire();
@@ -62,10 +66,19 @@ export class ScriptsTreeProvider implements vscode.TreeDataProvider<ScriptNode> 
   async getChildren(element?: ScriptNode): Promise<ScriptNode[]> {
     if (!element) {
       const scriptsDir = resolveUserPath(this.getScriptsDir());
-      const autoexecDir = path.join(os.homedir(), '.config', 'relapse', 'autoexec');
+      const profiles = this.getProfiles();
+      const configs = await Promise.all((profiles.length ? profiles : [undefined]).map(profile => configuration.resolve(profile)));
+      const autoexec = new Map<string, string[]>();
+      for (const config of configs) {
+        const names = autoexec.get(config.autoexec) ?? [];
+        names.push(config.profile);
+        autoexec.set(config.autoexec, names);
+      }
       return [
         new ScriptFolderItem('Scripts', scriptsDir, false),
-        new ScriptFolderItem('Autoexec', autoexecDir, true),
+        ...Array.from(autoexec, ([directory, names]) => new ScriptFolderItem(
+          autoexec.size === 1 ? 'Autoexec' : `Autoexec (${names.join(', ')})`, directory, true
+        )),
       ];
     }
 
