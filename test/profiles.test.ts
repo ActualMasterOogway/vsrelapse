@@ -12,6 +12,7 @@ import {
 } from '../src/profiles/store';
 import {
   AccountStore,
+  AccountSyncManager,
   parseCookie,
   cookieSha256,
 } from '../src/profiles/account';
@@ -248,6 +249,90 @@ describe('ProfileStore & AccountStore', () => {
     assert.equal(trashed.length, 1);
     assert.equal(trashed[0], path.dirname(configuration.profilePath('ghost', config)));
     await assert.rejects(fs.lstat(missingData));
+  });
+
+  it('saveAccount updates account.json atomically even while profile .lock is held', async () => {
+    const dir = await makeDir();
+    const config = options(dir);
+    const store = new ProfileStore(config);
+    const accounts = new AccountStore(config);
+    await store.createProfile('running');
+    const dataDir = await store.profilePath('running');
+    const lockFile = path.join(dataDir, '.lock');
+    const locker = spawn('flock', ['-x', lockFile, 'sleep', '5']);
+    try {
+      await new Promise((r) => setTimeout(r, 100));
+      assert.equal(await store.isProfileRunning('running'), true);
+      await accounts.saveAccount('running', {
+        userId: 42,
+        username: 'liveuser',
+        displayName: 'Live User',
+        cookieHash: cookieSha256('tok'),
+        checkedAt: 1700000000,
+      });
+      const loaded = await accounts.loadAccount('running', 'tok');
+      assert.equal(loaded?.username, 'liveuser');
+    } finally {
+      locker.kill('SIGKILL');
+    }
+  });
+
+  it('AccountSyncManager refreshes stale rotated cookies in background without duplicate lookups', async () => {
+    const dir = await makeDir();
+    const config = options(dir);
+    const store = new ProfileStore(config);
+    const accounts = new AccountStore(config);
+    await store.createProfile('Default');
+    await accounts.importAccount(
+      'Default',
+      'old_cookie',
+      {
+        userId: 100,
+        username: 'sysfive',
+        displayName: 'sysfive',
+        cookieHash: cookieSha256('old_cookie'),
+        checkedAt: 1700000000,
+      },
+      false
+    );
+
+    // Simulate Sober rotating .ROBLOSECURITY on disk
+    const soberCookies = path.join(await store.profilePath('Default'), 'state', 'app', 'data', 'sober', 'cookies');
+    await fs.writeFile(soberCookies, '.ROBLOSECURITY=rotated_cookie; RBXEventTrackerV2=123', 'utf8');
+
+    let lookups = 0;
+    const updatedProfiles: string[] = [];
+    const syncer = new AccountSyncManager(
+      accounts,
+      (name) => updatedProfiles.push(name),
+      async (cookie) => {
+        lookups++;
+        assert.equal(cookie, 'rotated_cookie');
+        return {
+          userId: 100,
+          username: 'sysfive',
+          displayName: 'sysfive',
+          cookieHash: cookieSha256(cookie),
+          checkedAt: 1700000100,
+        };
+      }
+    );
+
+    const first = await syncer.resolve('Default');
+    assert.equal(first.account?.username, 'sysfive');
+    assert.equal(first.stale, true);
+
+    // Second call while in flight should not issue another lookup
+    await syncer.resolve('Default');
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.equal(lookups, 1);
+    assert.deepEqual(updatedProfiles, ['Default']);
+
+    const after = await syncer.resolve('Default');
+    assert.equal(after.account?.username, 'sysfive');
+    assert.equal(after.stale, false);
+    assert.equal(lookups, 1);
   });
 
 });

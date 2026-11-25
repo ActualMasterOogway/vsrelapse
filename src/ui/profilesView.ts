@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { AccountStore, ProfileAccount } from '../profiles/account';
+import { AccountStore, AccountSyncManager, ProfileAccount } from '../profiles/account';
 import { ProfileStore } from '../profiles/store';
 import { SessionInfo } from '../socket/sessionManager';
 
@@ -7,6 +7,7 @@ export interface ProfileEntry {
   name: string;
   running: boolean;
   launching: boolean;
+  expired: boolean;
   sessionState?: SessionInfo['state'];
   sessionPath?: string;
   account: ProfileAccount | null;
@@ -26,6 +27,8 @@ export class ProfileTreeItem extends vscode.TreeItem {
     const parts: string[] = [];
     if (profile.account) {
       parts.push(`@${profile.account.username}`);
+    } else if (profile.expired) {
+      parts.push('Login expired');
     }
     if (profile.launching) {
       parts.push('Launching…');
@@ -43,6 +46,8 @@ export class ProfileTreeItem extends vscode.TreeItem {
     const tipLines = [`Profile: ${profile.name}`];
     if (profile.account) {
       tipLines.push(`Account: ${profile.account.displayName} (@${profile.account.username})`);
+    } else if (profile.expired) {
+      tipLines.push('Account: .ROBLOSECURITY expired or invalid — import a new cookie');
     }
     tipLines.push(
       `Status: ${
@@ -77,12 +82,19 @@ export class ProfilesTreeProvider implements vscode.TreeDataProvider<ProfileTree
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
   private readonly launchingProfiles = new Set<string>();
+  private readonly accountSync: AccountSyncManager;
 
   constructor(
     private readonly profileStore: ProfileStore,
     private readonly accountStore: AccountStore,
     private readonly getSessions: () => SessionInfo[] = () => []
-  ) {}
+  ) {
+    this.accountSync = new AccountSyncManager(this.accountStore, () => this.refresh());
+  }
+
+  invalidateAccount(name: string): void {
+    this.accountSync.invalidate(name);
+  }
 
   setLaunching(name: string, launching: boolean): void {
     if (launching) {
@@ -119,9 +131,11 @@ export class ProfilesTreeProvider implements vscode.TreeDataProvider<ProfileTree
         const running = Boolean(session) || (await this.profileStore.isProfileRunning(name));
         let account: ProfileAccount | null = null;
         let avatarPath: string | null = null;
+        let expired = false;
         try {
-          const cookie = await this.accountStore.readCookie(name);
-          account = await this.accountStore.loadAccount(name, cookie);
+          const resolved = await this.accountSync.resolve(name);
+          account = resolved.account;
+          expired = resolved.expired;
           if (account) {
             avatarPath = await this.accountStore.getAvatarPath(name, account);
           }
@@ -132,6 +146,7 @@ export class ProfilesTreeProvider implements vscode.TreeDataProvider<ProfileTree
           name,
           running,
           launching,
+          expired,
           sessionState: session?.state,
           sessionPath: session?.path,
           account,

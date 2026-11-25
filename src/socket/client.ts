@@ -85,6 +85,9 @@ export class SocketClient extends EventEmitter {
     } catch (error) {
       if (this.shutdown.signal.aborted) return;
       this.setState('disconnected');
+      const code = (error as { cause?: { code?: string }; code?: string })?.cause?.code ??
+        (error as { code?: string })?.code;
+      if (code === 'ENOENT' || code === 'ECONNREFUSED') return;
       this.reportError(error instanceof Error ? error.message : String(error));
     }
   }

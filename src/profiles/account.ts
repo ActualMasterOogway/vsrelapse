@@ -144,24 +144,32 @@ export class AccountStore {
 
   async saveAccount(name: string, account: ProfileAccount): Promise<void> {
     const dataDir = await this.profileDir(name);
-    await withProfileLock(dataDir, async () => {
-      const accountPath = path.join(dataDir, 'account.json');
-      const payload: Record<string, unknown> = {
-        version: 1,
-        user_id: account.userId,
-        username: account.username,
-        display_name: account.displayName,
-        checked_at: account.checkedAt,
-        cookie_sha256: account.cookieHash,
-      };
-      if (account.avatarBase64) {
-        payload.avatar_png_base64 = account.avatarBase64;
-      }
-      await fs.writeFile(accountPath, JSON.stringify(payload, null, 2), {
+    await fs.mkdir(dataDir, { recursive: true, mode: 0o700 });
+    const accountPath = path.join(dataDir, 'account.json');
+    const payload: Record<string, unknown> = {
+      version: 1,
+      user_id: account.userId,
+      username: account.username,
+      display_name: account.displayName,
+      checked_at: account.checkedAt,
+      cookie_sha256: account.cookieHash,
+    };
+    if (account.avatarBase64) {
+      payload.avatar_png_base64 = account.avatarBase64;
+    }
+    const tmpPath = `${accountPath}.tmp.${process.pid}.${Date.now()}`;
+    try {
+      await fs.writeFile(tmpPath, JSON.stringify(payload, null, 2), {
         encoding: 'utf8',
+        flag: 'wx',
         mode: 0o600,
       });
-    });
+      await fs.rename(tmpPath, accountPath);
+    } finally {
+      await fs.unlink(tmpPath).catch((err: NodeJS.ErrnoException) => {
+        if (err.code !== 'ENOENT') throw err;
+      });
+    }
   }
 
   async importAccount(
@@ -299,5 +307,80 @@ export class AccountStore {
     const filePath = path.join(this.avatarCacheDir, `${name}-${account.userId}.png`);
     await fs.writeFile(filePath, Buffer.from(account.avatarBase64, 'base64'));
     return filePath;
+  }
+}
+
+export interface ResolvedAccountState {
+  account: ProfileAccount | null;
+  stale: boolean;
+  expired: boolean;
+}
+
+export class AccountSyncManager {
+  private readonly inFlight = new Set<string>();
+  private readonly lastAttempt = new Map<string, number>();
+  private readonly expiredKeys = new Set<string>();
+
+  constructor(
+    private readonly store: AccountStore,
+    private readonly onUpdated: (name: string) => void,
+    private readonly lookupFn: (cookie: string) => Promise<ProfileAccount> = (c) =>
+      this.store.lookupAccount(c),
+    private readonly retryCooldownMs = 60_000
+  ) {}
+
+  invalidate(name: string): void {
+    const prefix = `${name}:`;
+    for (const key of this.lastAttempt.keys()) {
+      if (key.startsWith(prefix)) this.lastAttempt.delete(key);
+    }
+    for (const key of this.expiredKeys) {
+      if (key.startsWith(prefix)) this.expiredKeys.delete(key);
+    }
+  }
+
+  async resolve(name: string): Promise<ResolvedAccountState> {
+    const cookie = await this.store.readCookie(name);
+    if (!cookie) {
+      return { account: null, stale: false, expired: false };
+    }
+    const verified = await this.store.loadAccount(name, cookie);
+    const key = `${name}:${cookieSha256(cookie)}`;
+    if (verified) {
+      this.expiredKeys.delete(key);
+      return { account: verified, stale: false, expired: false };
+    }
+
+    const cached = await this.store.loadAccount(name);
+    const expired = this.expiredKeys.has(key);
+    const last = this.lastAttempt.get(key) ?? 0;
+    const due = !expired && !this.inFlight.has(key) && Date.now() - last >= this.retryCooldownMs;
+    if (due) {
+      this.inFlight.add(key);
+      this.lastAttempt.set(key, Date.now());
+      void this.refreshInBackground(name, cookie, key);
+    }
+    return {
+      account: expired ? null : cached,
+      stale: !expired,
+      expired,
+    };
+  }
+
+  private async refreshInBackground(name: string, cookie: string, key: string): Promise<void> {
+    try {
+      const fresh = await this.lookupFn(cookie);
+      await this.store.saveAccount(name, fresh);
+      this.expiredKeys.delete(key);
+      this.onUpdated(name);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('invalid or expired')) {
+        this.expiredKeys.add(key);
+        this.onUpdated(name);
+      }
+    } finally {
+      this.inFlight.delete(key);
+    }
   }
 }

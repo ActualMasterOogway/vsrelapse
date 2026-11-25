@@ -193,14 +193,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const configWatcher = vscode.workspace.createFileSystemWatcher(
     new vscode.RelativePattern(configuration.configDirectory(), '**/config.json')
   );
+  const dataWatcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(configuration.dataDirectory(), '**/{account.json,cookies}')
+  );
   const refreshConfiguration = () => {
     profilesProvider.refresh();
     scriptsProvider.refresh();
   };
-  context.subscriptions.push(configWatcher,
+  const refreshAccounts = () => {
+    profilesProvider.refresh();
+  };
+  context.subscriptions.push(
+    configWatcher,
+    dataWatcher,
     configWatcher.onDidCreate(refreshConfiguration),
     configWatcher.onDidChange(refreshConfiguration),
-    configWatcher.onDidDelete(refreshConfiguration));
+    configWatcher.onDidDelete(refreshConfiguration),
+    dataWatcher.onDidCreate(refreshAccounts),
+    dataWatcher.onDidChange(refreshAccounts),
+    dataWatcher.onDidDelete(refreshAccounts)
+  );
 
   // Configuration changes
   context.subscriptions.push(
@@ -469,7 +481,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('relapse.refreshProfiles', () => profilesProvider.refresh()),
+    vscode.commands.registerCommand('relapse.refreshProfiles', () => {
+      for (const item of profilesProvider.getLaunchingProfiles()) {
+        profilesProvider.invalidateAccount(item);
+      }
+      void profileStore.listProfiles().then((names) => {
+        for (const name of names) profilesProvider.invalidateAccount(name);
+        profilesProvider.refresh();
+      });
+    }),
 
     vscode.commands.registerCommand('relapse.createProfile', async () => {
       const name = await vscode.window.showInputBox({
@@ -533,6 +553,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           try {
             const account = await accountStore.lookupAccount(raw);
             await accountStore.importAccount(item.profile.name, raw, account, false);
+            profilesProvider.invalidateAccount(item.profile.name);
             profilesProvider.refresh();
             void vscode.window.showInformationMessage(
               `Imported @${account.username} (${account.displayName}) into "${item.profile.name}".`
@@ -556,6 +577,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
         const account = await accountStore.lookupAccount(cookie);
         await accountStore.saveAccount(item.profile.name, account);
+        profilesProvider.invalidateAccount(item.profile.name);
         profilesProvider.refresh();
       } catch (err) {
         void vscode.window.showErrorMessage(err instanceof Error ? err.message : String(err));
