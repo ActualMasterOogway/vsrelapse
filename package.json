@@ -2,7 +2,7 @@
   "name": "vsrelapse",
   "displayName": "Relapse",
   "description": "VS Code-native Relapse script executor, output/rconsole bridge, and profile/account manager",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "ActualMasterOogway",
   "author": {
     "name": "ActualMasterOogway",
